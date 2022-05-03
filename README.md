@@ -1,4 +1,4 @@
-# e-goat
+# E-Goat
 tcp peer2peer network implementation
 
 # Can you use it to communicate with devices outside your LAN?
