@@ -1,6 +1,8 @@
 # E-Goat
 tcp peer2peer network implementation
 
+https://github.com/shashwatdixit124/IPConnect
+
 # Can you use it to communicate with devices outside your LAN?
 
 you may be running into an ISP problem because you have a residential network, and they all have a clause in the terms of use that forbid running a service to the Internet, and some ISPs actively block that. 
