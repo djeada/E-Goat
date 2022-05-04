@@ -1,5 +1,5 @@
 # E-Goat
-tcp peer2peer network implementation
+Real-time chat application built on peer-to-peer network architecture and the TCP protocol.
 
 https://github.com/shashwatdixit124/IPConnect
 
