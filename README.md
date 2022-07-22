@@ -1,7 +1,8 @@
 # E-Goat
 Real-time chat application built on peer-to-peer network architecture and the TCP protocol.
 
-https://github.com/shashwatdixit124/IPConnect
+* http://web.mit.edu/6.005/www/fa15/classes/21-sockets-networking/
+* https://github.com/shashwatdixit124/IPConnect
 
 # Can you use it to communicate with devices outside your LAN?
 
