@@ -3,6 +3,7 @@ Real-time chat application built on peer-to-peer network architecture and the TC
 
 * http://web.mit.edu/6.005/www/fa15/classes/21-sockets-networking/
 * https://github.com/shashwatdixit124/IPConnect
+* https://iximiuz.com/en/posts/writing-web-server-in-python-sockets/
 
 # Can you use it to communicate with devices outside your LAN?
 
