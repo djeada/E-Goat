@@ -19,13 +19,13 @@ To get E-Goat up and running, you need to:
 1. Clone the repository:
 
 ```bash
-git clone https://github.com/your-username/P2PCommunicator.git
+git clone https://github.com/djeada/E-Goat.git
 ```
 
 2. Navigate to the project directory
 
 ```bash
-cd P2PCommunicator
+cd E-Goat
 ```
 
 3. Install the required packages
@@ -39,52 +39,44 @@ pip install -r requirements.txt
 To start using E-Goat, run the application:
 
 ```bash
-python3 main.py
+python main.py
 ```
 
 Then, simply follow the prompts to connect with a peer and start chatting.
 
-
 ## System Desing
 
-The following diagram depicts the structure of our application:
+A visual representation of the structure is shown below:
 
 ```
-+-------------+            +-------------+
-|   P2PNode   |            |   P2PNode   |
-|   Server    |<---->      |   Server    |
-|   (host1)   |   connect  |   (host2)   |
-|   Port:5000 |   <---->   |   Port:5001 |
-+------+------+            +------+------+
-       |                            |
-       |                            |
-       v                            v
-+------+-------+            +-------+------+
-| P2PNodeRunner|            | P2PNodeRunner|
-|   User       |            |   User       |
-|  Interface   |            |  Interface   |
-| (localhost)  |            | (localhost)  |
-|   Port:5000  |            |   Port:5001  |
-+--------------+            +--------------+
+[C/S]<--->[C/S]<--->[C/S]
+  ^         ^         ^ 
+  |         |         |
+  v         v         v
+[C/S]<--->[C/S]<--->[C/S]
+  ^         ^         ^ 
+  |         |         |
+  v         v         v
+[C/S]<--->[C/S]<--->[C/S]
 ```
+
+In this diagram, each `[C/S]` symbolizes a node in the network, with the two-way arrows (`<--->`) indicating a bi-directional communication link. In this model, all nodes are fully connected, allowing each to communicate directly with every other node. Such an arrangement is referred to as a fully connected or complete network. While it's the most resilient network type, it's also the most complex due to the high number of links required. For a network with N nodes, there are N*(N-1)/2 links.
+
+Components:
+
+- P2PNode: A P2PNode is used for each node in the network. It combines the functionalities of the P2PServer and the P2PClient.
+- P2PServer: Every node operates a server instance in a separate thread, ready to receive connections from other peers. The server can decode and process messages according to the established protocol.
+- P2PClient: Each node uses a client instance to connect with other peers and to dispatch messages. Messages are encoded in line with the protocol and transmitted over the established connection.
+- NetworkClient: This is a low-level wrapper for a socket that connects to a server and dispatches a message. After each message transmission, the client socket is closed.
+- NetworkServer: This is a low-level wrapper for a server socket. It constantly listens for incoming connections, forwarding the client socket and the received data to a predefined handler function.
+
+The system architecture is designed to manage multi-threading. Each outgoing connection from a client to a server operates in its own thread. This enables asynchronous communication, where a node can establish several connections and communicate with various peers simultaneously.
+
+Additionally, the system incorporates error handling to manage issues such as failed connections. The design of the system prioritizes modularity, ensuring a clear delineation of roles among the classes.
 
 ## External Communication
 
 Communicating with devices outside your Local Area Network (LAN) can be restricted due to residential network ISP limitations. To effectively use IPv4, your router must have an IPv4 WAN address. If it's not available, it might be because your ISP is implementing NAT, which prevents you from forwarding a port and using IPv4. For IPv6, you should use the Global IPv6 address assigned to your server, not the WAN address.
-
-## The Necessity of Threads in Networking
-
-Threads are integral in networking due to the following reasons:
-
-- They permit parallel processing, allowing multiple network connections to be handled simultaneously.
-- Complex network tasks can be segmented and managed in an efficient, organized manner.
-- They offer responsiveness and scalability in server applications, enabling the handling of numerous incoming requests at once.
-- Concurrent running of background tasks, such as sending keep-alive signals, without impacting the main application is possible.
-
-One server socket per node, and N client sockets: In this setup, each node maintains a server socket to listen for incoming connections and a client socket for every other node in the network to initiate connections. This could work but it can be resource-intensive and might not scale well. As the number of nodes increases, the number of sockets also increases quadratically, leading to more complexity in managing connections.
-
-Socket-per-thread approach: Here, each socket connection (whether client or server) is managed by a separate thread. This approach can be effective at handling multiple simultaneous connections as it allows for concurrent processing of each connection. However, it can also become resource-intensive as the number of threads increases, as each thread consumes system resources (e.g., memory for stack space). There's also the added complexity of thread management and synchronization to prevent data races and inconsistencies.
-
 
 ## Areas for Improvement and Expansion
 
