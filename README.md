@@ -78,19 +78,6 @@ Additionally, the system incorporates error handling to manage issues such as fa
 
 Communicating with devices outside your Local Area Network (LAN) can be restricted due to residential network ISP limitations. To effectively use IPv4, your router must have an IPv4 WAN address. If it's not available, it might be because your ISP is implementing NAT, which prevents you from forwarding a port and using IPv4. For IPv6, you should use the Global IPv6 address assigned to your server, not the WAN address.
 
-## Areas for Improvement and Expansion
-
-E-Goat currently lacks:
-
-- Robust Error Handling: Given the susceptibility of network programming to errors, a solid error handling mechanism is crucial.
-- Non-blocking I/O: The current version uses blocking I/O, hindering the simultaneous execution of other tasks. 
-- Handling Multiple Connections: The present system can manage multiple incoming connections but only one peer connection at a time.
-- Encryption: To ensure secure communication, messages and files need to be encrypted.
-- Authentication: A method for authenticating peers should be implemented.
-- File Chunking: Large files should be broken into smaller chunks for more efficient transmission.
-- File Reconstruction: A mechanism for reassembling file chunks into the original file is necessary.
-- Graphical User Interface (GUI): A GUI would improve user interaction, replacing the current console-only output.
-
 ## References
 
 - [Open Computer Science Fundamentals](https://w3.cs.jmu.edu/kirkpams/OpenCSF/Books/csf/html/)
