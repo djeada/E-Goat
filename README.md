@@ -81,6 +81,11 @@ Threads are integral in networking due to the following reasons:
 - They offer responsiveness and scalability in server applications, enabling the handling of numerous incoming requests at once.
 - Concurrent running of background tasks, such as sending keep-alive signals, without impacting the main application is possible.
 
+One server socket per node, and N client sockets: In this setup, each node maintains a server socket to listen for incoming connections and a client socket for every other node in the network to initiate connections. This could work but it can be resource-intensive and might not scale well. As the number of nodes increases, the number of sockets also increases quadratically, leading to more complexity in managing connections.
+
+Socket-per-thread approach: Here, each socket connection (whether client or server) is managed by a separate thread. This approach can be effective at handling multiple simultaneous connections as it allows for concurrent processing of each connection. However, it can also become resource-intensive as the number of threads increases, as each thread consumes system resources (e.g., memory for stack space). There's also the added complexity of thread management and synchronization to prevent data races and inconsistencies.
+
+
 ## Areas for Improvement and Expansion
 
 E-Goat currently lacks:
@@ -98,7 +103,7 @@ E-Goat currently lacks:
 
 - [Open Computer Science Fundamentals](https://w3.cs.jmu.edu/kirkpams/OpenCSF/Books/csf/html/)
 - [MIT 6.005: Software Construction](http://web.mit.edu/6.005/www/fa15/classes/21-sockets-networking/)
-- [IPConnect on GitHub](https://github.com/shashwatdixit124/IPConnect)
+- [Beej's Guide to Network Programming](https://beej.us/guide/bgnet/)
 - [Writing a Web Server in Python](https://iximiuz.com/en/posts/writing-web-server-in-python-sockets/)
 
 ## Contributing
