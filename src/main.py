@@ -1,55 +1,46 @@
 import argparse
-import threading
-import time
-import queue
-from p2p.node import P2PNode
+
+from src.apps.cli.node_cli import NodeCLI
 
 
-class NodeCLI:
-    def __init__(self, host: str, port: int):
-        self.node = P2PNode(host, port)
-        self.active = False
+def run_cli(host: str, port: int) -> None:
+    """
+    Starts the command line interface for the P2P Node.
 
-    def start(self):
-        print("Starting node...")
-        self.node.start()
-        self.active = True
-        threading.Thread(target=self.receive_messages, daemon=True).start()
-        self.run_cli()
+    Args:
+        host: The host address of the node.
+        port: The port number of the node.
+    """
+    node_cli = NodeCLI(host, port)
+    node_cli.cmdloop()
 
-    def stop(self):
-        print("Stopping node...")
-        self.node.stop()
-        self.active = False
 
-    def run_cli(self):
-        try:
-            host = "localhost"
-            port = int(input("Enter port to connect: ").strip())
+def run_gui(host: str, port: int) -> None:
+    """
+    Starts the graphical user interface for the P2P Node.
 
-            if self.node.connect_to_peer(host, port):
-                print(f"Successfully connected to {host}:{port}")
-            else:
-                print(f"Could not connect to {host}:{port}")
-        except:
-            pass
-        while self.active:
-            message = input("Enter message to send: ").strip()
-            self.node.broadcast_message(message)
-
-    def receive_messages(self):
-        while self.active:
-            message = self.node.read_next_message()
-            if message:
-                print(f"Received message: {message}")
-            time.sleep(0.1)
+    Args:
+        host: The host address of the node.
+        port: The port number of the node.
+    """
+    raise NotImplementedError("GUI option is not implemented yet")
+    # node_gui = NodeGUI(host, port)
+    # node_gui.mainloop()  # Assuming your GUI has a mainloop method
 
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="CLI for P2P Node")
     parser.add_argument("host", help="Host of the P2P node")
     parser.add_argument("port", type=int, help="Port for the P2P node")
+    parser.add_argument(
+        "--mode",
+        choices=["cli", "gui"],
+        default="cli",
+        help="Choose the mode: CLI (default) or GUI",
+    )
     args = parser.parse_args()
 
-    node_cli = NodeCLI(args.host, args.port)
-    node_cli.start()
+    if args.mode == "gui":
+        run_gui(args.host, args.port)
+    else:
+        run_cli(args.host, args.port)
