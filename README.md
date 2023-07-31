@@ -88,10 +88,6 @@ The system architecture is designed to manage multi-threading. Each outgoing con
 
 Additionally, the system incorporates error handling to manage issues such as failed connections. The design of the system prioritizes modularity, ensuring a clear delineation of roles among the classes.
 
-## External Communication
-
-Communicating with devices outside your Local Area Network (LAN) can be restricted due to residential network ISP limitations. To effectively use IPv4, your router must have an IPv4 WAN address. If it's not available, it might be because your ISP is implementing NAT, which prevents you from forwarding a port and using IPv4. For IPv6, you should use the Global IPv6 address assigned to your server, not the WAN address.
-
 ## References
 
 - [Open Computer Science Fundamentals](https://w3.cs.jmu.edu/kirkpams/OpenCSF/Books/csf/html/)
