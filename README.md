@@ -12,37 +12,51 @@ E-Goat is a powerful real-time chat application, implemented with a strong focus
 - **File Sharing**: You can share files directly with your peers without uploading them to a server first.
 - **Chat History**: E-Goat stores your chat history locally, allowing you to access past conversations.
 
+## Prerequisites
+
+Before starting the installation, ensure that you have the following installed on your machine:
+
+- Git
+- Python 3.9 or higher
+- pip (Python package installer)
+
 ## Installation
 
-To get E-Goat up and running, you need to:
+To install E-Goat, follow the steps outlined below:
 
-1. Clone the repository:
+1. Clone the repository: This will download a copy of the E-Goat source code onto your local machine. Open a terminal window and run the following command:
 
 ```bash
 git clone https://github.com/djeada/E-Goat.git
 ```
 
-2. Navigate to the project directory
+2. Navigate to the project directory: Change your current working directory to the cloned E-Goat directory:
 
 ```bash
 cd E-Goat
 ```
 
-3. Install the required packages
+3. Install the required packages: E-Goat has a number of Python package dependencies. These can be installed by running the following command:
 
 ```bash
 pip install -r requirements.txt
 ```
 
+Please note that it is recommended to use a virtual environment to avoid conflicts with other Python projects.
+
 ## Usage
 
-To start using E-Goat, run the application:
+Once you have successfully installed E-Goat, you can start using it by following the steps outlined below:
+
+1. Run the application: Open a terminal window, ensure you are in the E-Goat directory, and run the following command:
 
 ```bash
-python main.py
+python -m src.main localhost 3333
 ```
 
-Then, simply follow the prompts to connect with a peer and start chatting.
+Replace 'localhost' and '3333' with the host address and port number you wish to use.
+
+2. Follow the prompts: Once the application starts, you will be guided through the process of connecting with a peer and starting a chat. Simply follow the prompts on the screen to begin chatting.
 
 ## System Desing
 
