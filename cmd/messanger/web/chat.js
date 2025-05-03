@@ -15,19 +15,20 @@ window.addEventListener("load", () => {
   fetchIP();
 
   // Auto-join if deep-linked
-  const params = new URLSearchParams(location.search);
+  const params    = new URLSearchParams(location.search);
   const urlRoom   = params.get("room");
   const urlPeerId = params.get("peer_id");
   if (urlRoom && urlPeerId) {
     peerId = urlPeerId;
     document.getElementById("room-input").value = urlRoom;
     joinRoom();
-  } else {
-    document.getElementById("create-room-btn")
-            .addEventListener("click", joinRoom);
-    document.getElementById("send-btn")
-            .addEventListener("click", sendMessage);
   }
+
+  // Always bind buttons
+  document.getElementById("create-room-btn")
+          .addEventListener("click", joinRoom);
+  document.getElementById("send-btn")
+          .addEventListener("click", sendMessage);
 });
 
 async function fetchIP() {
@@ -92,11 +93,9 @@ async function sendMessage() {
       body:    JSON.stringify({ room, peer_id: peerId, text }),
     });
     if (!res.ok) throw new Error(res.statusText);
-    // Optionally read returned timestamp:
     const { timestamp } = await res.json();
     if (timestamp > lastTs) lastTs = timestamp;
   } catch (e) {
-    // Mark as failed
     appendMessage("Error", text);
     console.error("Send failed:", e);
   }
@@ -104,7 +103,7 @@ async function sendMessage() {
 
 function appendMessage(from, txt) {
   const container = document.getElementById("messages");
-  const line = document.createElement("div");
+  const line      = document.createElement("div");
   line.textContent = `${from}: ${txt}`;
   container.appendChild(line);
   container.scrollTop = container.scrollHeight;
