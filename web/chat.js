@@ -1,60 +1,96 @@
-// web/chat.js
-
-// Grab config injected by indexHandler
+// Grab the ports, and the host from the page context
 const { wsPort, httpPort } = window.config;
+const host = location.hostname;
 
-// Prompt (or read) room and peer ID
-const room   = prompt("Room name:");
-const peerId = prompt("Your peer ID:") || crypto.randomUUID();
+let room, peerId, myIP;
+let sigWs, chatWs;
 
-// -- 1️⃣ Signaling WebSocket (for WebRTC handshake) --
-const sigWs = new WebSocket(
-  `ws://${location.hostname}:${wsPort}/signal?room=${room}&peer_id=${peerId}`
-);
-
-sigWs.addEventListener("open", () => {
-  console.log("🔑 Signaling connected");
+// On load…
+window.addEventListener("load", () => {
+  peerId = crypto.randomUUID();
+  fetchIP();
+  document.getElementById("create-room-btn")
+          .addEventListener("click", joinRoom);
+  document.getElementById("send-btn")
+          .addEventListener("click", sendMessage);
 });
 
-sigWs.addEventListener("message", async (evt) => {
-  // Forward any incoming signal blobs to the server-side Pion Peer automatically—
-  // your Go signaling layer will route offers/answers/ICE to the other peers.
-  console.debug("⏳ Signal received:", evt.data);
-  // (Nothing else to do here: server.HandleSignal is called automatically)
-});
+// 1. Fetch external IP for invitation
+async function fetchIP() {
+  try {
+    const res = await fetch("https://api.ipify.org?format=json");
+    const { ip } = await res.json();
+    myIP = ip;
+    document.getElementById("my-ip").textContent = ip;
+  } catch (e) {
+    console.error("IP fetch failed", e);
+    document.getElementById("my-ip").textContent = "Unknown";
+  }
+}
 
-// -- 2️⃣ Chat WebSocket (for text chat) --
-// You need to add a Go handler at `/chat` that upgrades to WS, registers the client 
-// similarly to signaling, and relays JSON `{ peer_id, text }` messages over all
-// active WebRTC DataChannels.
-const chatWs = new WebSocket(
-  `ws://${location.hostname}:${httpPort}/chat?room=${room}&peer_id=${peerId}`
-);
+// 2. Create/join a room
+function joinRoom() {
+  room = document.getElementById("room-input").value.trim();
+  if (!room) return alert("Please enter a room name.");
 
-chatWs.addEventListener("open", () => {
-  console.log("💬 Chat connected");
-});
+  // Build invitation string
+  const invite = `Connect to IP: ${myIP}:${wsPort}, Room: ${room}`;
+  const invEl = document.getElementById("invite-text");
+  invEl.value = invite;
+  document.getElementById("invitation")
+          .classList.remove("hidden");
 
-chatWs.addEventListener("message", (evt) => {
-  // Expect JSON: { peer_id: string, text: string }
-  const msg = JSON.parse(evt.data);
-  addMessage(msg.peer_id, msg.text);
-});
+  // Swap views
+  document.getElementById("init").classList.add("hidden");
+  document.getElementById("chat").classList.remove("hidden");
+  document.getElementById("room-info")
+          .textContent = `Room: ${room}`;
 
-// Send button wiring
-document.getElementById("sendBtn").addEventListener("click", () => {
-  const input = document.getElementById("msgInput");
+  // Open websockets
+  openSignalingWS();
+  openChatWS();
+}
+
+// 3. Signaling WS for WebRTC handshake
+function openSignalingWS() {
+  sigWs = new WebSocket(
+    `ws://${host}:${wsPort}/signal?room=${room}&peer_id=${peerId}`
+  );
+  sigWs.addEventListener("open", () => {
+    console.log("🔑 Signaling WS open");
+  });
+  sigWs.addEventListener("message", evt => {
+    console.debug("⏳ Signal:", evt.data);
+    // Server-side Pion peers handle these under-the-hood
+  });
+}
+
+// 4. Chat WS for text messages
+function openChatWS() {
+  chatWs = new WebSocket(
+    `ws://${host}:${httpPort}/chat?room=${room}&peer_id=${peerId}`
+  );
+  chatWs.addEventListener("open", () => {
+    console.log("💬 Chat WS open");
+  });
+  chatWs.addEventListener("message", evt => {
+    const msg = JSON.parse(evt.data);
+    appendMessage(msg.peer_id, msg.text);
+  });
+}
+
+// 5. Sending a message
+function sendMessage() {
+  const input = document.getElementById("msg-input");
   const text  = input.value.trim();
-  if (!text) return;
-  // Send over the chat WS
+  if (!text || !chatWs || chatWs.readyState !== 1) return;
   chatWs.send(JSON.stringify({ peer_id: peerId, text }));
-  // Optimistically display your message
-  addMessage("Me", text);
+  appendMessage("Me", text);
   input.value = "";
-});
+}
 
-// Utility to append to the message list
-function addMessage(from, txt) {
+// 6. Append to chat area
+function appendMessage(from, txt) {
   const container = document.getElementById("messages");
   const line = document.createElement("div");
   line.textContent = `${from}: ${txt}`;
