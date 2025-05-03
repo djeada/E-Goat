@@ -239,3 +239,63 @@ func (c *Client) writePump() {
         }
     }
 }
+
+// ServeChat handles plain‐text chat over WebSocket, relays into WebRTC DataChannels,
+// and echoes back to the browser so the UI can render it.
+// URL query must provide: ?room=<roomID>&peer_id=<yourPeerID>
+func (h *Hub) ServeChat(w http.ResponseWriter, r *http.Request) {
+    room := r.URL.Query().Get("room")
+    peerID := r.URL.Query().Get("peer_id")
+    if room == "" || peerID == "" {
+        http.Error(w, "room and peer_id parameters are required", http.StatusBadRequest)
+        return
+    }
+
+    // Upgrade connection
+    conn, err := upgrader.Upgrade(w, r, nil)
+    if err != nil {
+        log.Printf("Chat WS upgrade error: %v", err)
+        return
+    }
+    defer conn.Close()
+
+    // Simple loop: read JSON {peer_id,text}
+    for {
+        var msg struct {
+            PeerID string `json:"peer_id"`
+            Text   string `json:"text"`
+        }
+        if err := conn.ReadJSON(&msg); err != nil {
+            log.Printf("Chat read error: %v", err)
+            return
+        }
+
+        // Persist chat text
+        if err := storage.SaveMessage(
+            h.db, room, msg.PeerID,
+            "text", []byte(msg.Text), nil,
+        ); err != nil {
+            log.Printf("failed to save chat message: %v", err)
+        }
+
+        // Fan-out into all Pion DataChannels in the room
+        h.mu.RLock()
+        for c := range h.rooms[room] {
+            // do not send back to the same peer’s WS here,
+            // but DataChannel is truly P2P
+            if c.peer != nil {
+                if err := c.peer.SendMessage([]byte(msg.Text)); err != nil {
+                    log.Printf("failed to send DataChannel msg to %s: %v", c.peerID, err)
+                }
+            }
+        }
+        h.mu.RUnlock()
+
+        // Echo back to the browser WS so the UI can append it
+        if err := conn.WriteJSON(msg); err != nil {
+            log.Printf("Chat write error: %v", err)
+            return
+        }
+    }
+}
+
