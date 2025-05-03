@@ -1,14 +1,35 @@
-// Grab the ports, and the host from the page context
+// web/chat.js
+
+// Grab the ports and host from the page context
 const { wsPort, httpPort } = window.config;
 const host = location.hostname;
 
 let room, peerId, myIP;
 let sigWs, chatWs;
 
+// Helper to read URL query params
+function getParam(name) {
+  return new URLSearchParams(location.search).get(name);
+}
+
 // On load…
 window.addEventListener("load", () => {
+  // Generate our own peer ID
   peerId = crypto.randomUUID();
   fetchIP();
+
+  // If the URL includes room & peer_id, auto‐join
+  const urlRoom   = getParam("room");
+  const urlPeerId = getParam("peer_id");
+  if (urlRoom && urlPeerId) {
+    // Use those values and start immediately
+    peerId = urlPeerId;
+    document.getElementById("room-input").value = urlRoom;
+    joinRoom();
+    return;
+  }
+
+  // Otherwise wait for the user to click
   document.getElementById("create-room-btn")
           .addEventListener("click", joinRoom);
   document.getElementById("send-btn")
@@ -33,9 +54,9 @@ function joinRoom() {
   room = document.getElementById("room-input").value.trim();
   if (!room) return alert("Please enter a room name.");
 
-  // Build invitation string
-  const invite = `ws://${myIP}:${wsPort}/signal?room=${room}&peer_id=${peerId}`;
-  document.getElementById("invite-text").value = invite;
+  // Build invitation string (HTTP deep-link)
+  const invite = `http://${myIP}:${httpPort}/?room=${room}&peer_id=${peerId}`;
+  document.getElementById("invite-text").value      = invite;
   document.getElementById("invite-text-chat").value = invite;
   document.getElementById("invitation").classList.remove("hidden");
 
@@ -44,12 +65,12 @@ function joinRoom() {
   document.getElementById("chat").classList.remove("hidden");
   document.getElementById("room-info").textContent = `Room: ${room}`;
 
-  // Open websockets
+  // Open WebSockets
   openSignalingWS();
   openChatWS();
 }
 
-// 3. Signaling WS for WebRTC handshake
+// 3. Signaling WS for WebRTC handshake (handled under-the-hood)
 function openSignalingWS() {
   sigWs = new WebSocket(
     `ws://${host}:${wsPort}/signal?room=${room}&peer_id=${peerId}`
@@ -59,7 +80,6 @@ function openSignalingWS() {
   });
   sigWs.addEventListener("message", evt => {
     console.debug("⏳ Signal:", evt.data);
-    // Server-side Pion peers handle these under-the-hood
   });
 }
 
@@ -73,21 +93,19 @@ function openChatWS() {
   });
   chatWs.addEventListener("message", evt => {
     const msg = JSON.parse(evt.data);
-    // Only render messages from others (we render our own on send)
+    // Only render messages from others
     if (msg.peer_id !== peerId) {
       appendMessage(msg.peer_id, msg.text);
     }
   });
 }
 
-// 5. Sending a message
+// 5. Send a message
 function sendMessage() {
   const input = document.getElementById("msg-input");
   const text  = input.value.trim();
-  if (!text || !chatWs || chatWs.readyState !== 1) return;
-  // Send to server
+  if (!text || !chatWs || chatWs.readyState !== WebSocket.OPEN) return;
   chatWs.send(JSON.stringify({ peer_id: peerId, text }));
-  // Optimistic render
   appendMessage("Me", text);
   input.value = "";
 }
