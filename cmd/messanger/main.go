@@ -18,6 +18,7 @@ import (
     _ "github.com/mattn/go-sqlite3"
 
     "github.com/djeada/E-Goat/internal/storage"
+    "github.com/djeada/E-Goat/internal/signaling"
 )
 
 var (
@@ -35,7 +36,7 @@ func init() {
     flag.StringVar(&dbPath, "db", "chat.db", "Path to SQLite database file")
 }
 
-// WebSocket upgrader configuration
+// WebSocket upgrader config (used by the signaling Hub internally)
 var upgrader = websocket.Upgrader{
     ReadBufferSize:  1024,
     WriteBufferSize: 1024,
@@ -45,37 +46,48 @@ var upgrader = websocket.Upgrader{
 func main() {
     flag.Parse()
 
-    // Initialize database via internal/storage
+    // 1. Init DB
     db, err := storage.InitDB(dbPath)
     if err != nil {
         log.Fatalf("Database initialization failed: %v", err)
     }
     defer db.Close()
 
-    // Prepare embedded web assets
+    // 2. Create & run signaling Hub
+    hub := signaling.NewHub(db)  // assumes NewHub takes *sql.DB
+    go hub.Run()
+
+    // 3. Prepare embedded assets
     contentFS, err := fs.Sub(embeddedFS, "web")
     if err != nil {
         log.Fatalf("Failed to locate embedded web assets: %v", err)
     }
 
+    // 4. HTTP mux
     mux := http.NewServeMux()
-    mux.HandleFunc("/signal", signalingHandler)
+    mux.HandleFunc("/signal", hub.ServeWS) // websocket endpoint for signaling
     mux.Handle("/static/", http.StripPrefix("/static/", http.FileServer(http.FS(contentFS))))
     mux.HandleFunc("/", indexHandler)
 
-    // HTTP server
+    // 5. Start HTTP server
     srv := &http.Server{
         Addr:    fmt.Sprintf(":%d", httpPort),
         Handler: mux,
     }
+    go func() {
+        log.Printf("HTTP server listening on http://localhost%s", srv.Addr)
+        if err := srv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
+            log.Fatalf("HTTP server error: %v", err)
+        }
+    }()
 
-    // WebSocket (signaling) server on separate port
+    // 6. Start WebSocket (signaling) on its own port if desired
     go func() {
         wsSrv := &http.Server{
             Addr: fmt.Sprintf(":%d", wsPort),
             Handler: http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
                 if r.URL.Path == "/signal" {
-                    signalingHandler(w, r)
+                    hub.ServeWS(w, r)
                 } else {
                     http.NotFound(w, r)
                 }
@@ -87,17 +99,9 @@ func main() {
         }
     }()
 
-    // Graceful shutdown setup
+    // 7. Graceful shutdown
     quit := make(chan os.Signal, 1)
     signal.Notify(quit, os.Interrupt, syscall.SIGTERM)
-
-    go func() {
-        log.Printf("HTTP server listening on http://localhost%s", srv.Addr)
-        if err := srv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
-            log.Fatalf("HTTP server error: %v", err)
-        }
-    }()
-
     <-quit
     log.Println("Shutting down servers...")
     ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
@@ -108,38 +112,14 @@ func main() {
     }
 }
 
-// signalingHandler upgrades HTTP connections to WebSocket and currently echoes messages.
-// You'll swap this out for room-based dispatch once the signaling Hub is wired in.
-func signalingHandler(w http.ResponseWriter, r *http.Request) {
-    conn, err := upgrader.Upgrade(w, r, nil)
-    if err != nil {
-        log.Printf("WebSocket upgrade error: %v", err)
-        return
-    }
-    defer conn.Close()
-
-    for {
-        msgType, msg, err := conn.ReadMessage()
-        if err != nil {
-            log.Printf("WebSocket read error: %v", err)
-            return
-        }
-        // Echo back the message
-        if err := conn.WriteMessage(msgType, msg); err != nil {
-            log.Printf("WebSocket write error: %v", err)
-            return
-        }
-    }
-}
-
-// indexHandler serves the main web UI page, injecting the wsPort into the client-side config.
+// indexHandler serves `index.html`, injecting wsPort for the client
 func indexHandler(w http.ResponseWriter, r *http.Request) {
     w.Header().Set("Content-Type", "text/html; charset=utf-8")
+    // expose wsPort in the browser
     portScript := fmt.Sprintf(`<script>window.config = { wsPort: %d };</script>`, wsPort)
     if _, err := w.Write([]byte(portScript)); err != nil {
         log.Printf("Error writing port script: %v", err)
     }
-
     data, err := embeddedFS.ReadFile("web/index.html")
     if err != nil {
         http.Error(w, "Index page not found", http.StatusInternalServerError)
@@ -150,7 +130,7 @@ func indexHandler(w http.ResponseWriter, r *http.Request) {
     }
 }
 
-// newPeerID generates a unique identifier for peers
+// newPeerID generates a unique identifier for each connecting peer
 func newPeerID() string {
     return uuid.New().String()
 }
