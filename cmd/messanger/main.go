@@ -2,7 +2,9 @@ package main
 
 import (
     "context"
+    "database/sql"
     "embed"
+    "encoding/json"
     "flag"
     "fmt"
     "io/fs"
@@ -10,6 +12,7 @@ import (
     "net/http"
     "os"
     "os/signal"
+    "strconv"
     "syscall"
     "time"
 
@@ -30,7 +33,7 @@ var (
 )
 
 func init() {
-    flag.IntVar(&httpPort, "http-port", 8080, "Port for HTTP server (UI + chat WS)")
+    flag.IntVar(&httpPort, "http-port", 8080, "Port for HTTP server (UI + polling endpoints)")
     flag.IntVar(&wsPort, "ws-port", 9000, "Port for signaling WebSocket server")
     flag.StringVar(&dbPath, "db", "chat.db", "Path to SQLite database file")
 }
@@ -45,7 +48,7 @@ func main() {
     }
     defer db.Close()
 
-    // 2. Create & run the signaling/chat Hub
+    // 2. Create & run the signaling Hub
     hub := signaling.NewHub(db)
     go hub.Run()
 
@@ -55,13 +58,12 @@ func main() {
         log.Fatalf("Failed to locate embedded web assets: %v", err)
     }
 
-    // 4. HTTP mux for UI + chat WS
+    // 4. HTTP mux for UI + polling/send endpoints
     httpMux := http.NewServeMux()
-    // Chat WebSocket (over HTTP port)
-    httpMux.HandleFunc("/chat", hub.ServeChat)
-    // Static assets and UI
     httpMux.Handle("/static/", http.StripPrefix("/static/", http.FileServer(http.FS(contentFS))))
     httpMux.HandleFunc("/", indexHandler)
+    httpMux.HandleFunc("/history", historyHandler(db))
+    httpMux.HandleFunc("/send", sendHandler(db))
 
     httpSrv := &http.Server{
         Addr:    fmt.Sprintf(":%d", httpPort),
@@ -107,10 +109,9 @@ func main() {
     }
 }
 
-// indexHandler serves `index.html`, injecting ports for the client
+// indexHandler serves `index.html`, injecting wsPort and httpPort for the client
 func indexHandler(w http.ResponseWriter, r *http.Request) {
     w.Header().Set("Content-Type", "text/html; charset=utf-8")
-    // Expose both ports to the browser
     portScript := fmt.Sprintf(
         `<script>window.config = { wsPort: %d, httpPort: %d };</script>`,
         wsPort, httpPort,
@@ -128,7 +129,71 @@ func indexHandler(w http.ResponseWriter, r *http.Request) {
     }
 }
 
-// newPeerID generates a unique identifier for each client (if you need it elsewhere)
-func newPeerID() string {
-    return uuid.New().String()
+// historyHandler returns JSON array of new chat messages since the given timestamp.
+func historyHandler(db *sql.DB) http.HandlerFunc {
+    type outMsg struct {
+        PeerID    string `json:"peer_id"`
+        Text      string `json:"text"`
+        Timestamp int64  `json:"timestamp"`
+    }
+    return func(w http.ResponseWriter, r *http.Request) {
+        room := r.URL.Query().Get("room")
+        sinceStr := r.URL.Query().Get("since")
+        since, _ := strconv.ParseInt(sinceStr, 10, 64)
+
+        rows, err := db.Query(`
+            SELECT peer_id, content, timestamp
+              FROM messages
+             WHERE room = ?
+               AND msg_type = 'text'
+               AND timestamp > ?
+             ORDER BY timestamp ASC
+        `, room, since)
+        if err != nil {
+            http.Error(w, "query error", http.StatusInternalServerError)
+            return
+        }
+        defer rows.Close()
+
+        var out []outMsg
+        for rows.Next() {
+            var peerID string
+            var content []byte
+            var ts int64
+            if err := rows.Scan(&peerID, &content, &ts); err != nil {
+                continue
+            }
+            out = append(out, outMsg{peerID, string(content), ts})
+        }
+        w.Header().Set("Content-Type", "application/json")
+        json.NewEncoder(w).Encode(out)
+    }
+}
+
+// sendHandler accepts a new chat message and saves it, returning its timestamp.
+func sendHandler(db *sql.DB) http.HandlerFunc {
+    type inMsg struct {
+        Room   string `json:"room"`
+        PeerID string `json:"peer_id"`
+        Text   string `json:"text"`
+    }
+    type out struct {
+        Timestamp int64 `json:"timestamp"`
+    }
+    return func(w http.ResponseWriter, r *http.Request) {
+        var m inMsg
+        if err := json.NewDecoder(r.Body).Decode(&m); err != nil {
+            http.Error(w, "bad JSON", http.StatusBadRequest)
+            return
+        }
+
+        now := time.Now().Unix()
+        if err := storage.SaveMessage(db, m.Room, m.PeerID, "text", []byte(m.Text), nil); err != nil {
+            http.Error(w, "save error", http.StatusInternalServerError)
+            return
+        }
+
+        w.Header().Set("Content-Type", "application/json")
+        json.NewEncoder(w).Encode(out{Timestamp: now})
+    }
 }
