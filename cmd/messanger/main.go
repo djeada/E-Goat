@@ -21,7 +21,7 @@ import (
 )
 
 var (
-    //go:embed ../../web/*
+    //go:embed web/*
     embeddedFS embed.FS
 
     httpPort int
