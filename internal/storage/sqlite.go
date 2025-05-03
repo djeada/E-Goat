@@ -4,6 +4,7 @@ package storage
 import (
     "database/sql"
     "fmt"
+
     _ "github.com/mattn/go-sqlite3"
 )
 
@@ -14,6 +15,7 @@ func InitDB(path string) (*sql.DB, error) {
         return nil, fmt.Errorf("opening database: %w", err)
     }
 
+    // Schema now includes 'room' and 'peer_id' on messages
     schema := []string{
         `CREATE TABLE IF NOT EXISTS peers (
             id        INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -21,12 +23,13 @@ func InitDB(path string) (*sql.DB, error) {
             last_seen INTEGER
         );`,
         `CREATE TABLE IF NOT EXISTS messages (
-            id        INTEGER PRIMARY KEY AUTOINCREMENT,
-            direction TEXT    NOT NULL,
-            timestamp INTEGER NOT NULL,
-            msg_type  TEXT    NOT NULL,
-            content   BLOB    NOT NULL,
-            filename  TEXT
+            id         INTEGER PRIMARY KEY AUTOINCREMENT,
+            room       TEXT    NOT NULL,
+            peer_id    TEXT    NOT NULL,
+            timestamp  INTEGER NOT NULL,
+            msg_type   TEXT    NOT NULL,
+            content    BLOB    NOT NULL,
+            filename   TEXT
         );`,
     }
 
@@ -38,4 +41,15 @@ func InitDB(path string) (*sql.DB, error) {
     }
 
     return db, nil
+}
+
+// SaveMessage writes a chat message (text or file chunk) into the messages table.
+// filename can be empty when msgType != "file".
+func SaveMessage(db *sql.DB, room, peerID, msgType string, content []byte, filename *string) error {
+    _, err := db.Exec(
+        `INSERT INTO messages(room, peer_id, timestamp, msg_type, content, filename)
+         VALUES(?, ?, strftime('%s','now'), ?, ?, ?)`,
+        room, peerID, msgType, content, filename,
+    )
+    return err
 }
