@@ -3,6 +3,7 @@ package signaling
 
 import (
     "database/sql"
+    "encoding/json"
     "log"
     "net/http"
     "sync"
@@ -10,29 +11,27 @@ import (
 
     "github.com/gorilla/websocket"
     "github.com/djeada/E-Goat/internal/storage"
+    "github.com/djeada/E-Goat/internal/webrtc"
 )
 
 const (
-    // Time allowed to write a message to the peer.
-    writeWait = 10 * time.Second
-    // Time allowed to read the next pong message from the peer.
-    pongWait = 60 * time.Second
-    // Send pings to peer with this period. Must be less than pongWait.
-    pingPeriod = (pongWait * 9) / 10
-    // Maximum message size allowed from peer.
+    writeWait      = 10 * time.Second
+    pongWait       = 60 * time.Second
+    pingPeriod     = (pongWait * 9) / 10
     maxMessageSize = 512
 )
 
-// Client is a middleman between the websocket connection and the Hub.
+// Client is a middleman between the websocket connection, the Hub, and a WebRTC Peer.
 type Client struct {
     hub    *Hub
     conn   *websocket.Conn
-    send   chan []byte
+    send   chan []byte     // outbound WS messages (signaling)
     room   string
     peerID string
+    peer   *webrtc.Peer    // Pion PeerConnection wrapper
 }
 
-// Hub maintains the set of active clients and broadcasts messages to rooms.
+// Hub manages active clients and message routing.
 type Hub struct {
     db         *sql.DB
     rooms      map[string]map[*Client]bool
@@ -42,14 +41,14 @@ type Hub struct {
     mu         sync.RWMutex
 }
 
-// Message holds the room and payload to broadcast.
+// Message is a raw blob to broadcast to a room.
 type Message struct {
     Room    string
     Payload []byte
     Sender  *Client
 }
 
-// NewHub initializes a Hub with a database handle.
+// NewHub creates a Hub tied to a SQLite DB.
 func NewHub(db *sql.DB) *Hub {
     return &Hub{
         db:         db,
@@ -60,7 +59,7 @@ func NewHub(db *sql.DB) *Hub {
     }
 }
 
-// Run processes register/unregister and broadcast requests.
+// Run drives register/unregister/broadcast loops.
 func (h *Hub) Run() {
     for {
         select {
@@ -80,6 +79,9 @@ func (h *Hub) Run() {
                 if _, exists := conns[client]; exists {
                     delete(conns, client)
                     close(client.send)
+                    if client.peer != nil {
+                        client.peer.Close()
+                    }
                     if len(conns) == 0 {
                         delete(h.rooms, client.room)
                     }
@@ -88,6 +90,14 @@ func (h *Hub) Run() {
             h.mu.Unlock()
 
         case msg := <-h.broadcast:
+            // persist signaling to DB
+            if err := storage.SaveMessage(
+                h.db, msg.Room, msg.Sender.peerID,
+                "signal", msg.Payload, nil,
+            ); err != nil {
+                log.Printf("failed to save signaling message: %v", err)
+            }
+
             h.mu.RLock()
             conns := h.rooms[msg.Room]
             h.mu.RUnlock()
@@ -111,8 +121,7 @@ var upgrader = websocket.Upgrader{
     CheckOrigin:     func(r *http.Request) bool { return true },
 }
 
-// ServeHTTP handles WebSocket requests for signaling. URL query must provide:
-//   ?room=<roomID>&peer_id=<yourPeerID>
+// ServeHTTP upgrades to WebSocket, registers the client, and sets up its Peer.
 func (h *Hub) ServeHTTP(w http.ResponseWriter, r *http.Request) {
     room := r.URL.Query().Get("room")
     peerID := r.URL.Query().Get("peer_id")
@@ -134,15 +143,40 @@ func (h *Hub) ServeHTTP(w http.ResponseWriter, r *http.Request) {
         room:   room,
         peerID: peerID,
     }
-    client.hub.register <- client
 
-    // start pumps
+    // Define how this Peer sends signaling back into the Hub:
+    sendSignal := func(msg webrtc.Message) error {
+        raw, err := json.Marshal(msg)
+        if err != nil {
+            return err
+        }
+        h.broadcast <- &Message{Room: room, Payload: raw, Sender: client}
+        return nil
+    }
+    // No-op onMessage: actual chat data is P2P via DataChannel.
+    onMessage := func(from string, data []byte) {}
+    // On WebRTC failure/close, unregister the client.
+    onClose := func() {
+        h.unregister <- client
+        client.conn.Close()
+    }
+
+    // Create the WebRTC Peer
+    p, err := webrtc.NewPeer(peerID, onMessage, sendSignal, onClose)
+    if err != nil {
+        log.Printf("failed to create WebRTC Peer for %s: %v", peerID, err)
+        conn.Close()
+        return
+    }
+    client.peer = p
+
+    // Register and start pumps
+    client.hub.register <- client
     go client.writePump()
     client.readPump()
 }
 
-// readPump pumps messages from the WebSocket connection to the Hub,
-// and persists them via storage.SaveMessage.
+// readPump reads incoming WS messages, routes them into Peer.HandleSignal.
 func (c *Client) readPump() {
     defer func() {
         c.hub.unregister <- c
@@ -157,7 +191,7 @@ func (c *Client) readPump() {
     })
 
     for {
-        _, message, err := c.conn.ReadMessage()
+        _, raw, err := c.conn.ReadMessage()
         if err != nil {
             if websocket.IsUnexpectedCloseError(err, websocket.CloseGoingAway, websocket.CloseAbnormalClosure) {
                 log.Printf("readPump error for peer %s: %v", c.peerID, err)
@@ -165,24 +199,19 @@ func (c *Client) readPump() {
             break
         }
 
-        // Persist the raw signaling message
-        if err := storage.SaveMessage(
-            c.hub.db,
-            c.room,
-            c.peerID,
-            "signal",
-            message,
-            nil,
-        ); err != nil {
-            log.Printf("failed to save signaling message: %v", err)
+        var sig webrtc.Message
+        if err := json.Unmarshal(raw, &sig); err != nil {
+            log.Printf("invalid signal json from %s: %v", c.peerID, err)
+            continue
         }
 
-        // Broadcast to other clients in the room
-        c.hub.broadcast <- &Message{Room: c.room, Payload: message, Sender: c}
+        if err := c.peer.HandleSignal(sig); err != nil {
+            log.Printf("peer.HandleSignal error for %s: %v", c.peerID, err)
+        }
     }
 }
 
-// writePump pumps messages from the Hub to the WebSocket connection.
+// writePump writes outbound signaling messages back over the WS.
 func (c *Client) writePump() {
     ticker := time.NewTicker(pingPeriod)
     defer func() {
@@ -195,8 +224,7 @@ func (c *Client) writePump() {
         case message, ok := <-c.send:
             c.conn.SetWriteDeadline(time.Now().Add(writeWait))
             if !ok {
-                // Hub closed the channel.
-                c.conn.WriteMessage(websocket.CloseMessage, []byte{})
+                c.conn.WriteMessage(websocket.CloseMessage, nil)
                 return
             }
             if err := c.conn.WriteMessage(websocket.TextMessage, message); err != nil {
