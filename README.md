@@ -2,6 +2,8 @@
 
 E-Goat is a powerful real-time chat application, implemented with a strong focus on the peer-to-peer (P2P) network architecture. The application utilizes the TCP protocol, thereby ensuring reliable data transmission. The decentralized design of E-Goat makes it resilient to network failures and eliminates dependency on central servers.
 
+![e_goat](https://github.com/user-attachments/assets/9ac71bdd-1fe3-41b9-89c0-21de1e140ced)
+
 ## Core Features
 
 - **Peer-to-Peer Communication**: E-Goat facilitates direct, server-less communication between devices.
