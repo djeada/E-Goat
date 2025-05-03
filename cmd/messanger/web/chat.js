@@ -1,14 +1,16 @@
 // web/chat.js
 
-// Grab only the signaling port from config (chat uses the same host:port as the page)
+// Only the signaling port needs to come from Go
 const { wsPort } = window.config;
-const host    = location.hostname;
-const httpHost = location.host;     // includes port, e.g. "localhost:8080"
+
+// Derive the HTTP host:port and protocol directly from the page
+const httpOrigin = location.origin;              // e.g. "http://localhost:8080"
+const wsHost     = `${location.hostname}:${wsPort}`;  // e.g. "localhost:9000"
 
 let room, peerId, myIP;
 let sigWs, chatWs;
 
-// Helper to read URL query params
+// Helper: read URL param
 function getParam(name) {
   return new URLSearchParams(location.search).get(name);
 }
@@ -18,7 +20,7 @@ window.addEventListener("load", () => {
   peerId = crypto.randomUUID();
   fetchIP();
 
-  // Auto-join if the URL has room & peer_id
+  // If deep-linked with ?room=…&peer_id=…, auto-join
   const urlRoom   = getParam("room");
   const urlPeerId = getParam("peer_id");
   if (urlRoom && urlPeerId) {
@@ -28,13 +30,14 @@ window.addEventListener("load", () => {
     return;
   }
 
+  // Otherwise wait for user actions
   document.getElementById("create-room-btn")
           .addEventListener("click", joinRoom);
   document.getElementById("send-btn")
           .addEventListener("click", sendMessage);
 });
 
-// 1️Fetch your external IP for display
+// 1 Get your external IP
 async function fetchIP() {
   try {
     const res = await fetch("https://api.ipify.org?format=json");
@@ -46,51 +49,50 @@ async function fetchIP() {
   }
 }
 
-// 2️ Create/join a room
+// 2 Create or join the room
 function joinRoom() {
   room = document.getElementById("room-input").value.trim();
-  if (!room) return alert("Please enter a room name.");
+  if (!room) {
+    return alert("Please enter a room name.");
+  }
 
-  // Build HTTP deep-link invitation
-  const invite = `http://${httpHost}/?room=${room}&peer_id=${peerId}`;
+  // Build the HTTP deep-link using location.origin
+  const invite = `${httpOrigin}/?room=${room}&peer_id=${peerId}`;
   document.getElementById("invite-text"     ).value = invite;
   document.getElementById("invite-text-chat").value = invite;
   document.getElementById("invitation").classList.remove("hidden");
 
-  // Show chat UI
+  // Swap UI
   document.getElementById("init").classList.add("hidden");
   document.getElementById("chat").classList.remove("hidden");
   document.getElementById("room-info").textContent = `Room: ${room}`;
 
+  // Open the two WebSocket channels
   openSignalingWS();
   openChatWS();
 }
 
-// 3️ Signaling WS for WebRTC handshake
+// 3 Signaling WS (Pion handshake) at separate port
 function openSignalingWS() {
-  sigWs = new WebSocket(
-    `ws://${host}:${wsPort}/signal?room=${room}&peer_id=${peerId}`
-  );
-  sigWs.addEventListener("open", () => console.log("🔑 Signaling WS open"));
+  sigWs = new WebSocket(`ws://${wsHost}/signal?room=${room}&peer_id=${peerId}`);
+  sigWs.addEventListener("open", () => console.log("🔑 Signaling open"));
   sigWs.addEventListener("message", evt => console.debug("⏳ Signal:", evt.data));
 }
 
-// 4️ Chat WS for text messages (same host:port as HTTP)
+// 4 Chat WS (text) on the same origin/port as the page
 function openChatWS() {
-  chatWs = new WebSocket(
-    `ws://${httpHost}/chat?room=${room}&peer_id=${peerId}`
-  );
-  chatWs.addEventListener("open", () => console.log("💬 Chat WS open"));
+  chatWs = new WebSocket(`${httpOrigin.replace(/^http/, "ws")}/chat?room=${room}&peer_id=${peerId}`);
+  chatWs.addEventListener("open", () => console.log("💬 Chat open"));
   chatWs.addEventListener("message", evt => {
     const msg = JSON.parse(evt.data);
-    // Only show from others (we render ours on send)
+    // Only render others’ messages (we render ours on send)
     if (msg.peer_id !== peerId) {
       appendMessage(msg.peer_id, msg.text);
     }
   });
 }
 
-// 5️ Send a chat message
+// 5 Send a chat message
 function sendMessage() {
   const input = document.getElementById("msg-input");
   const text  = input.value.trim();
@@ -100,7 +102,7 @@ function sendMessage() {
   input.value = "";
 }
 
-// 6️ Append a line to the chat box
+// 6️Append to chat log
 function appendMessage(from, txt) {
   const container = document.getElementById("messages");
   const line = document.createElement("div");
