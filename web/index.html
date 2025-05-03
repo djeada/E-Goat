@@ -1,0 +1,46 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1.0">
+  <link rel="stylesheet" href="/static/styles.css">
+  <title>E-Goat Chat</title>
+</head>
+<body>
+  <div id="init">
+    <h1>E-Goat Chat</h1>
+    <div class="field">
+      <label>Your IP:</label>
+      <span id="my-ip">Loading…</span>
+    </div>
+    <div class="field">
+      <label for="room-input">Room name:</label>
+      <input id="room-input" type="text" placeholder="e.g. goats101">
+    </div>
+    <button id="create-room-btn">Create / Join Room</button>
+
+    <div id="invitation" class="hidden">
+      <p>Share this with your friend:</p>
+      <textarea id="invite-text" readonly rows="2"></textarea>
+    </div>
+  </div>
+
+  <div id="chat" class="hidden">
+    <div id="room-info"></div>
+    <div id="messages"></div>
+    <div class="send-field">
+      <input id="msg-input" type="text" placeholder="Type a message…">
+      <button id="send-btn">Send</button>
+    </div>
+  </div>
+
+  <script>
+    // injected by Go’s indexHandler
+    window.config = {
+      wsPort:   {{.WsPort}},   // e.g. 9000
+      httpPort: {{.HttpPort}}, // e.g. 8080
+    };
+  </script>
+  <script src="/static/chat.js"></script>
+</body>
+</html>
