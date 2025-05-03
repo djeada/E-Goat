@@ -13,7 +13,6 @@ import (
     "syscall"
     "time"
 
-    "github.com/gorilla/websocket"
     "github.com/google/uuid"
     _ "github.com/mattn/go-sqlite3"
 
@@ -31,92 +30,91 @@ var (
 )
 
 func init() {
-    flag.IntVar(&httpPort, "http-port", 8080, "Port for the HTTP server (UI)")
-    flag.IntVar(&wsPort, "ws-port", 9000, "Port for WebSocket signaling server")
+    flag.IntVar(&httpPort, "http-port", 8080, "Port for HTTP server (UI + chat WS)")
+    flag.IntVar(&wsPort, "ws-port", 9000, "Port for signaling WebSocket server")
     flag.StringVar(&dbPath, "db", "chat.db", "Path to SQLite database file")
-}
-
-// WebSocket upgrader config (used by the signaling Hub internally)
-var upgrader = websocket.Upgrader{
-    ReadBufferSize:  1024,
-    WriteBufferSize: 1024,
-    CheckOrigin:     func(r *http.Request) bool { return true },
 }
 
 func main() {
     flag.Parse()
 
-    // 1. Init DB
+    // 1. Initialize SQLite database
     db, err := storage.InitDB(dbPath)
     if err != nil {
         log.Fatalf("Database initialization failed: %v", err)
     }
     defer db.Close()
 
-    // 2. Create & run signaling Hub
-    hub := signaling.NewHub(db)  // assumes NewHub takes *sql.DB
+    // 2. Create & run the signaling/chat Hub
+    hub := signaling.NewHub(db)
     go hub.Run()
 
-    // 3. Prepare embedded assets
+    // 3. Prepare embedded web assets
     contentFS, err := fs.Sub(embeddedFS, "web")
     if err != nil {
         log.Fatalf("Failed to locate embedded web assets: %v", err)
     }
 
-    // 4. HTTP mux
-    mux := http.NewServeMux()
-    mux.HandleFunc("/signal", hub.ServeWS) // websocket endpoint for signaling
-    mux.Handle("/static/", http.StripPrefix("/static/", http.FileServer(http.FS(contentFS))))
-    mux.HandleFunc("/", indexHandler)
+    // 4. HTTP mux for UI + chat WS
+    httpMux := http.NewServeMux()
+    // Chat WebSocket (over HTTP port)
+    httpMux.HandleFunc("/chat", hub.ServeChat)
+    // Static assets and UI
+    httpMux.Handle("/static/", http.StripPrefix("/static/", http.FileServer(http.FS(contentFS))))
+    httpMux.HandleFunc("/", indexHandler)
 
-    // 5. Start HTTP server
-    srv := &http.Server{
+    httpSrv := &http.Server{
         Addr:    fmt.Sprintf(":%d", httpPort),
-        Handler: mux,
+        Handler: httpMux,
     }
+
     go func() {
-        log.Printf("HTTP server listening on http://localhost%s", srv.Addr)
-        if err := srv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
+        log.Printf("HTTP server listening on http://localhost:%d", httpPort)
+        if err := httpSrv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
             log.Fatalf("HTTP server error: %v", err)
         }
     }()
 
-    // 6. Start WebSocket (signaling) on its own port if desired
+    // 5. Separate server for signaling WS (over WS port)
+    wsMux := http.NewServeMux()
+    wsMux.Handle("/signal", hub) // Hub implements ServeHTTP for signaling
+    wsSrv := &http.Server{
+        Addr:    fmt.Sprintf(":%d", wsPort),
+        Handler: wsMux,
+    }
+
     go func() {
-        wsSrv := &http.Server{
-            Addr: fmt.Sprintf(":%d", wsPort),
-            Handler: http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-                if r.URL.Path == "/signal" {
-                    hub.ServeWS(w, r)
-                } else {
-                    http.NotFound(w, r)
-                }
-            }),
-        }
-        log.Printf("WebSocket signaling server listening on %s", wsSrv.Addr)
+        log.Printf("Signaling WebSocket server listening on ws://localhost:%d/signal", wsPort)
         if err := wsSrv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
             log.Fatalf("WebSocket server error: %v", err)
         }
     }()
 
-    // 7. Graceful shutdown
+    // 6. Graceful shutdown on SIGINT/SIGTERM
     quit := make(chan os.Signal, 1)
     signal.Notify(quit, os.Interrupt, syscall.SIGTERM)
     <-quit
+
     log.Println("Shutting down servers...")
     ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
     defer cancel()
 
-    if err := srv.Shutdown(ctx); err != nil {
+    if err := httpSrv.Shutdown(ctx); err != nil {
         log.Printf("HTTP server shutdown error: %v", err)
+    }
+    if err := wsSrv.Shutdown(ctx); err != nil {
+        log.Printf("WebSocket server shutdown error: %v", err)
     }
 }
 
-// indexHandler serves `index.html`, injecting wsPort for the client
+// indexHandler serves `index.html`, injecting ports for the client
 func indexHandler(w http.ResponseWriter, r *http.Request) {
     w.Header().Set("Content-Type", "text/html; charset=utf-8")
-    // expose wsPort in the browser
-    portScript := fmt.Sprintf(`<script>window.config = { wsPort: %d };</script>`, wsPort)
+    // Expose both ports to the browser
+    portScript := fmt.Sprintf(
+        `<script>window.config = { wsPort: %d, httpPort: %d };</script>`,
+        wsPort, httpPort,
+    )
     if _, err := w.Write([]byte(portScript)); err != nil {
         log.Printf("Error writing port script: %v", err)
     }
@@ -130,7 +128,7 @@ func indexHandler(w http.ResponseWriter, r *http.Request) {
     }
 }
 
-// newPeerID generates a unique identifier for each connecting peer
+// newPeerID generates a unique identifier for each client (if you need it elsewhere)
 func newPeerID() string {
     return uuid.New().String()
 }
