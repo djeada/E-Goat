@@ -78,3 +78,11 @@ button:hover { background: #45a045; }
 .send-field button {
   margin-left: 0.5rem;
 }
+
+#invitation-chat {
+  margin-bottom: 1rem;
+}
+#invitation-chat textarea {
+  width: 100%;
+  font-family: monospace;
+}
