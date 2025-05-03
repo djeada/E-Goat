@@ -1,110 +1,113 @@
 // web/chat.js
 
-// Grab the signaling port (still used for WebRTC, if you want it)
+// Only the signaling port needs to come from Go
 const { wsPort } = window.config;
+const host       = location.hostname;
 
-// Derive our HTTP origin (e.g. "http://localhost:8080")
-const httpOrigin = location.origin;
+let room, peerId;
 
-let room, peerId, myIP;
-let pollInterval;
-let lastTs = 0;  // UNIX timestamp of the last‐seen message
+// 1 Open the signaling WebSocket for SDP & ICE
+let sigWs;
+function setupSignaling() {
+  sigWs = new WebSocket(`ws://${host}:${wsPort}/signal?room=${room}&peer_id=${peerId}`);
+  sigWs.addEventListener("open", () => console.log("🔑 Signaling WS open"));
+  sigWs.addEventListener("message", async evt => {
+    const msg = JSON.parse(evt.data);
+    // Ignore our own signals
+    if (msg.peer_id === peerId) return;
 
-window.addEventListener("load", () => {
-  peerId = crypto.randomUUID();
-  fetchIP();
+    if (msg.type === "offer") {
+      await pc.setRemoteDescription(new RTCSessionDescription({ type: "offer", sdp: msg.payload }));
+      const answer = await pc.createAnswer();
+      await pc.setLocalDescription(answer);
+      sendSignal("answer", answer.sdp);
 
-  // Auto-join if deep-linked
-  const params    = new URLSearchParams(location.search);
-  const urlRoom   = params.get("room");
-  const urlPeerId = params.get("peer_id");
-  if (urlRoom && urlPeerId) {
-    peerId = urlPeerId;
-    document.getElementById("room-input").value = urlRoom;
-    joinRoom();
-  }
+    } else if (msg.type === "answer") {
+      await pc.setRemoteDescription(new RTCSessionDescription({ type: "answer", sdp: msg.payload }));
 
-  // Always bind buttons
-  document.getElementById("create-room-btn")
-          .addEventListener("click", joinRoom);
-  document.getElementById("send-btn")
-          .addEventListener("click", sendMessage);
+    } else if (msg.type === "ice") {
+      try {
+        await pc.addIceCandidate(JSON.parse(msg.payload));
+      } catch (e) {
+        console.warn("Error adding ICE candidate:", e);
+      }
+    }
+  });
+}
+
+function sendSignal(type, payload) {
+  sigWs.send(JSON.stringify({ peer_id: peerId, type, payload }));
+}
+
+// 2 Create the RTCPeerConnection with STUN
+const pc = new RTCPeerConnection({
+  iceServers: [
+    { urls: "stun:stun.l.google.com:19302" },
+    // Add TURN here if needed
+  ]
 });
 
-async function fetchIP() {
-  try {
-    const res = await fetch("https://api.ipify.org?format=json");
-    const { ip } = await res.json();
-    myIP = ip;
-    document.getElementById("my-ip").textContent = ip;
-  } catch {
-    document.getElementById("my-ip").textContent = "Unknown";
+// Relay local ICE candidates
+pc.onicecandidate = ({ candidate }) => {
+  if (candidate) {
+    sendSignal("ice", JSON.stringify(candidate));
   }
-}
+};
 
-function joinRoom() {
-  room = document.getElementById("room-input").value.trim();
-  if (!room) return alert("Please enter a room name.");
+// When a remote DataChannel arrives
+pc.ondatachannel = ({ channel }) => {
+  setupDataChannel(channel);
+};
 
-  // Show invite deep-link
-  const invite = `${httpOrigin}/?room=${room}&peer_id=${peerId}`;
-  document.getElementById("invite-text"     ).value = invite;
-  document.getElementById("invite-text-chat").value = invite;
-  document.getElementById("invitation").classList.remove("hidden");
+// 3 On page load, wire up everything
+window.addEventListener("load", () => {
+  peerId = crypto.randomUUID();
 
-  // Swap views
-  document.getElementById("init").classList.add("hidden");
-  document.getElementById("chat").classList.remove("hidden");
+  // Grab room from URL or prompt
+  const params = new URLSearchParams(location.search);
+  room = params.get("room") || prompt("Room name?");
+  if (!room) return alert("Room is required");
+
   document.getElementById("room-info").textContent = `Room: ${room}`;
+  document.getElementById("create-room-btn").classList.add("hidden");
 
-  // Start polling history
-  pollHistory();
-  pollInterval = setInterval(pollHistory, 1000);
+  setupSignaling();
+
+  // Create our outgoing data channel
+  const channel = pc.createDataChannel("chat");
+  setupDataChannel(channel);
+
+  // Caller creates the offer
+  pc.createOffer().then(offer => pc.setLocalDescription(offer))
+                 .then(() => sendSignal("offer", pc.localDescription.sdp));
+});
+
+// 4 Setup a DataChannel for chat
+function setupDataChannel(channel) {
+  channel.onopen = () => {
+    console.log("📡 DataChannel open");
+    document.getElementById("send-btn").disabled = false;
+  };
+  channel.onmessage = ({ data }) => {
+    appendMessage("Peer", data);
+  };
+
+  document.getElementById("send-btn")
+          .addEventListener("click", () => {
+    const input = document.getElementById("msg-input");
+    const text  = input.value.trim();
+    if (!text) return;
+    channel.send(text);
+    appendMessage("Me", text);
+    input.value = "";
+  });
 }
 
-async function pollHistory() {
-  try {
-    const res = await fetch(
-      `${httpOrigin}/history?room=${encodeURIComponent(room)}&since=${lastTs}`
-    );
-    if (!res.ok) throw new Error(res.statusText);
-    const messages = await res.json();
-    for (const msg of messages) {
-      appendMessage(msg.peer_id, msg.text);
-      if (msg.timestamp > lastTs) lastTs = msg.timestamp;
-    }
-  } catch (e) {
-    console.error("History poll failed:", e);
-  }
-}
-
-async function sendMessage() {
-  const input = document.getElementById("msg-input");
-  const text  = input.value.trim();
-  if (!text) return;
-
-  appendMessage("Me", text);
-  input.value = "";
-
-  try {
-    const res = await fetch(`${httpOrigin}/send`, {
-      method:  "POST",
-      headers: { "Content-Type": "application/json" },
-      body:    JSON.stringify({ room, peer_id: peerId, text }),
-    });
-    if (!res.ok) throw new Error(res.statusText);
-    const { timestamp } = await res.json();
-    if (timestamp > lastTs) lastTs = timestamp;
-  } catch (e) {
-    appendMessage("Error", text);
-    console.error("Send failed:", e);
-  }
-}
-
-function appendMessage(from, txt) {
+// 5 Render a chat line
+function appendMessage(from, msg) {
   const container = document.getElementById("messages");
-  const line      = document.createElement("div");
-  line.textContent = `${from}: ${txt}`;
-  container.appendChild(line);
+  const div = document.createElement("div");
+  div.textContent = `${from}: ${msg}`;
+  container.appendChild(div);
   container.scrollTop = container.scrollHeight;
 }
