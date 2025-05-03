@@ -34,17 +34,15 @@ function joinRoom() {
   if (!room) return alert("Please enter a room name.");
 
   // Build invitation string
-  const invite = `Connect to IP: ${myIP}:${wsPort}, Room: ${room}`;
-  const invEl = document.getElementById("invite-text");
-  invEl.value = invite;
-  document.getElementById("invitation")
-          .classList.remove("hidden");
+  const invite = `ws://${myIP}:${wsPort}/signal?room=${room}&peer_id=${peerId}`;
+  document.getElementById("invite-text").value = invite;
+  document.getElementById("invite-text-chat").value = invite;
+  document.getElementById("invitation").classList.remove("hidden");
 
   // Swap views
   document.getElementById("init").classList.add("hidden");
   document.getElementById("chat").classList.remove("hidden");
-  document.getElementById("room-info")
-          .textContent = `Room: ${room}`;
+  document.getElementById("room-info").textContent = `Room: ${room}`;
 
   // Open websockets
   openSignalingWS();
@@ -75,7 +73,10 @@ function openChatWS() {
   });
   chatWs.addEventListener("message", evt => {
     const msg = JSON.parse(evt.data);
-    appendMessage(msg.peer_id, msg.text);
+    // Only render messages from others (we render our own on send)
+    if (msg.peer_id !== peerId) {
+      appendMessage(msg.peer_id, msg.text);
+    }
   });
 }
 
@@ -84,7 +85,9 @@ function sendMessage() {
   const input = document.getElementById("msg-input");
   const text  = input.value.trim();
   if (!text || !chatWs || chatWs.readyState !== 1) return;
+  // Send to server
   chatWs.send(JSON.stringify({ peer_id: peerId, text }));
+  // Optimistic render
   appendMessage("Me", text);
   input.value = "";
 }
