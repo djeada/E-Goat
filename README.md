@@ -1,101 +1,133 @@
 # E-Goat
 
-E-Goat is a powerful real-time chat application, implemented with a strong focus on the peer-to-peer (P2P) network architecture. The application utilizes the TCP protocol, thereby ensuring reliable data transmission. The decentralized design of E-Goat makes it resilient to network failures and eliminates dependency on central servers.
+E-Goat is a lightweight, fully peer-to-peer (P2P) messaging application that enables text and file transfers among any number of participants—no central server required. Packaged as a single static binary for Windows, macOS, and Linux, E-Goat is easy to distribute and run.
 
 ![e_goat](https://github.com/user-attachments/assets/9ac71bdd-1fe3-41b9-89c0-21de1e140ced)
 
-## Core Features
+## Features
 
-- **Peer-to-Peer Communication**: E-Goat facilitates direct, server-less communication between devices.
-- **Security**: Our app uses end-to-end encryption, ensuring the privacy and security of all communications.
-- **Reliability**: Thanks to the decentralized architecture, E-Goat is highly resilient to network failures.
-- **Cross-Platform Compatibility**: E-Goat is designed to work across different operating systems and device types.
-- **Offline Messaging**: Messages are stored offline and are delivered once the recipient comes online.
-- **File Sharing**: You can share files directly with your peers without uploading them to a server first.
-- **Chat History**: E-Goat stores your chat history locally, allowing you to access past conversations.
+* **True Peer-to-Peer**: Direct mesh network via WebRTC DataChannels; every participant connects to every other participant.
+* **Group Chat**: Support for 2+ participants per room without any central relay.
+* **Text & File Exchange**: Instant messaging and chunked file transfer over P2P links.
+* **Local Storage**: SQLite-based on-disk history (`chat.db`) for backup and migration.
+* **Single-Binary Distribution**: Built in Go, no runtime dependencies beyond a web browser.
+* **Minimal External Libraries**: Go standard library, Pion WebRTC, and SQLite driver only.
 
-## Prerequisites
+## Architectural Overview
 
-Before starting the installation, ensure that you have the following installed on your machine:
+E-Goat’s design centers on a pure P2P mesh using WebRTC. A lightweight signaling step is the only centralized component, used solely to bootstrap peer connections—once established, all data flows directly between clients.
 
-- Git
-- Python 3.9 or higher
-- pip (Python package installer)
+### 1. Signaling Phase
 
-## Installation
-
-To install E-Goat, follow the steps outlined below:
-
-1. Clone the repository: This will download a copy of the E-Goat source code onto your local machine. Open a terminal window and run the following command:
-
-```bash
-git clone https://github.com/djeada/E-Goat.git
+```text
++------------------+          +------------------+
+| Client A         |          | Client B         |
+| (Browser + HTTP) |          | (Browser + HTTP) |
++--------+---------+          +---------+--------+
+         |                             |
+         | WebSocket Signaling (offer/answer + ICE candidates)
+         |                             |
++--------v---------+          +---------v--------+
+| Signaling Server |          |                  |
++------------------+          +------------------+
 ```
 
-2. Navigate to the project directory: Change your current working directory to the cloned E-Goat directory:
+* **Signaling Server**: A minimal WebSocket service (embedded in the binary) that relays SDP offers, answers, and ICE candidates between peers. No media or chat data passes through.
 
-```bash
-cd E-Goat
+### 2. Mesh Topology
+
+Once signaling completes, each peer opens direct WebRTC DataChannels to every other peer in the room, forming a full mesh.
+
+```text
+        Peer A
+       /      \
+      /        \
+  Peer B ---- Peer C
+      \        /
+       \      /
+        Peer D
 ```
 
-3. Install the required packages: E-Goat has a number of Python package dependencies. These can be installed by running the following command:
+* **DataChannels**: Carry both text messages and file chunks (e.g., Base64 or binary frames).
+* **Scalability**: For N participants, N\*(N-1)/2 direct connections; optimal for small friend groups.
 
-```bash
-pip install -r requirements.txt
+### 3. Storage & UI
+
+```text
++------------------------+
+| E-Goat Binary          |
+| ┌────────────────────┐ |
+| | HTTP Server        | |
+| | - Serves UI assets | |
+| | - Offers REST API  | |
+| └────────────────────┘ |
+|                        |
+| ┌────────────────────┐ |
+| | Signaling WS Server| |
+| └────────────────────┘ |
+|                        |
+| ┌────────────────────┐ |
+| | Pion WebRTC Module | |
+| └────────────────────┘ |
+|                        |
+| ┌────────────────────┐ |
+| | SQLite Storage     | |
+| | (`chat.db`)        | |
+| └────────────────────┘ |
++------------------------+
+          |
+          v
+  Web Browser UI
+  (index.html, chat.js)
 ```
 
-Please note that it is recommended to use a virtual environment to avoid conflicts with other Python projects.
+* **Local HTTP Server**: Hosts the front-end (HTML/CSS/JS) at `http://localhost:PORT` and the WebSocket endpoint for signaling.
+* **SQLite Layer**: Stores messages and file metadata. Users can copy `chat.db` to back up or migrate their history.
+* **Frontend**: Vanilla JavaScript handles UI rendering, WebRTC DataChannel management, and local persistence calls.
 
-## Usage
+## Technologies & Dependencies
 
-Once you have successfully installed E-Goat, you can start using it by following the steps outlined below:
+* **Go**
 
-1. Run the application: Open a terminal window, ensure you are in the E-Goat directory, and run the following command:
+  * Core language for single-binary builds.
+  * Standard library: `net/http`, `database/sql`, `embed`, `flag`.
 
-```bash
-python -m src.main localhost 3333
+* **WebRTC**
+
+  * `github.com/pion/webrtc/v3`: Peer connection and DataChannel implementation in Go.
+
+* **SQLite**
+
+  * `github.com/mattn/go-sqlite3`: Embedded on-disk database.
+
+* **Frontend**
+
+  * Vanilla HTML, CSS, and JavaScript (WebRTC and WebSocket APIs).
+
+
+## Project Layout
+
 ```
-
-Replace 'localhost' and '3333' with the host address and port number you wish to use.
-
-2. Follow the prompts: Once the application starts, you will be guided through the process of connecting with a peer and starting a chat. Simply follow the prompts on the screen to begin chatting.
-
-## System Desing
-
-A visual representation of the structure is shown below:
-
+E-Goat/
+├── cmd/messenger/
+│   └── main.go           # Entrypoint: HTTP + WS servers, WebRTC init
+├── internal/
+│   ├── signaling/
+│   │   └── server.go     # WebSocket signaling handlers
+│   ├── webrtc/
+│   │   └── peer.go       # Pion WebRTC mesh logic
+│   ├── storage/
+│   │   └── sqlite.go     # DB setup and CRUD operations
+│   └── ui/
+│       ├── assets.go     # //embed HTML/CSS/JS
+│       └── handler.go    # HTTP handlers for UI and REST
+├── web/
+│   ├── index.html        # Chat interface
+│   ├── chat.js           # WebRTC + signaling logic
+│   └── styles.css        # Simple styling
+├── go.mod                # Module definitions
+└── README.md             # This file
 ```
-[C/S]<--->[C/S]<--->[C/S]
-  ^         ^         ^ 
-  |         |         |
-  v         v         v
-[C/S]<--->[C/S]<--->[C/S]
-  ^         ^         ^ 
-  |         |         |
-  v         v         v
-[C/S]<--->[C/S]<--->[C/S]
-```
-
-In this diagram, each `[C/S]` symbolizes a node in the network, with the two-way arrows (`<--->`) indicating a bi-directional communication link. In this model, all nodes are fully connected, allowing each to communicate directly with every other node. Such an arrangement is referred to as a fully connected or complete network. While it's the most resilient network type, it's also the most complex due to the high number of links required. For a network with N nodes, there are N*(N-1)/2 links.
-
-Components:
-
-- P2PNode: A P2PNode is used for each node in the network. It combines the functionalities of the P2PServer and the P2PClient.
-- P2PServer: Every node operates a server instance in a separate thread, ready to receive connections from other peers. The server can decode and process messages according to the established protocol.
-- P2PClient: Each node uses a client instance to connect with other peers and to dispatch messages. Messages are encoded in line with the protocol and transmitted over the established connection.
-- NetworkClient: This is a low-level wrapper for a socket that connects to a server and dispatches a message. After each message transmission, the client socket is closed.
-- NetworkServer: This is a low-level wrapper for a server socket. It constantly listens for incoming connections, forwarding the client socket and the received data to a predefined handler function.
-
-The system architecture is designed to manage multi-threading. Each outgoing connection from a client to a server operates in its own thread. This enables asynchronous communication, where a node can establish several connections and communicate with various peers simultaneously.
-
-Additionally, the system incorporates error handling to manage issues such as failed connections. The design of the system prioritizes modularity, ensuring a clear delineation of roles among the classes.
-
-## References
-
-- [Open Computer Science Fundamentals](https://w3.cs.jmu.edu/kirkpams/OpenCSF/Books/csf/html/)
-- [MIT 6.005: Software Construction](http://web.mit.edu/6.005/www/fa15/classes/21-sockets-networking/)
-- [Beej's Guide to Network Programming](https://beej.us/guide/bgnet/)
-- [Writing a Web Server in Python](https://iximiuz.com/en/posts/writing-web-server-in-python-sockets/)
 
 ## Contributing
 
