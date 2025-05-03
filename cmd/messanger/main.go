@@ -2,7 +2,6 @@ package main
 
 import (
     "context"
-    "database/sql"
     "embed"
     "flag"
     "fmt"
@@ -17,6 +16,8 @@ import (
     "github.com/gorilla/websocket"
     "github.com/google/uuid"
     _ "github.com/mattn/go-sqlite3"
+
+    "github.com/djeada/E-Goat/internal/storage"
 )
 
 var (
@@ -26,7 +27,6 @@ var (
     httpPort int
     wsPort   int
     dbPath   string
-    db        *sql.DB
 )
 
 func init() {
@@ -45,9 +45,8 @@ var upgrader = websocket.Upgrader{
 func main() {
     flag.Parse()
 
-    // Initialize database
-    var err error
-    db, err = initDB(dbPath)
+    // Initialize database via internal/storage
+    db, err := storage.InitDB(dbPath)
     if err != nil {
         log.Fatalf("Database initialization failed: %v", err)
     }
@@ -73,7 +72,7 @@ func main() {
     // WebSocket (signaling) server on separate port
     go func() {
         wsSrv := &http.Server{
-            Addr:    fmt.Sprintf(":%d", wsPort),
+            Addr: fmt.Sprintf(":%d", wsPort),
             Handler: http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
                 if r.URL.Path == "/signal" {
                     signalingHandler(w, r)
@@ -109,38 +108,8 @@ func main() {
     }
 }
 
-// initDB opens or creates the SQLite database and applies the schema
-func initDB(path string) (*sql.DB, error) {
-    db, err := sql.Open("sqlite3", path)
-    if err != nil {
-        return nil, fmt.Errorf("opening database: %w", err)
-    }
-
-    schema := []string{
-        `CREATE TABLE IF NOT EXISTS peers (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            peer_id TEXT NOT NULL UNIQUE,
-            last_seen INTEGER
-        );`,
-        `CREATE TABLE IF NOT EXISTS messages (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            direction TEXT NOT NULL,
-            timestamp INTEGER NOT NULL,
-            msg_type TEXT NOT NULL,
-            content BLOB NOT NULL,
-            filename TEXT
-        );`,
-    }
-    for _, stmt := range schema {
-        if _, err := db.Exec(stmt); err != nil {
-            db.Close()
-            return nil, fmt.Errorf("applying schema: %w", err)
-        }
-    }
-    return db, nil
-}
-
-// signalingHandler upgrades HTTP connections to WebSocket and echoes messages
+// signalingHandler upgrades HTTP connections to WebSocket and currently echoes messages.
+// You'll swap this out for room-based dispatch once the signaling Hub is wired in.
 func signalingHandler(w http.ResponseWriter, r *http.Request) {
     conn, err := upgrader.Upgrade(w, r, nil)
     if err != nil {
@@ -155,7 +124,7 @@ func signalingHandler(w http.ResponseWriter, r *http.Request) {
             log.Printf("WebSocket read error: %v", err)
             return
         }
-        // Echo back the message (replace with room-based dispatch in production)
+        // Echo back the message
         if err := conn.WriteMessage(msgType, msg); err != nil {
             log.Printf("WebSocket write error: %v", err)
             return
@@ -163,13 +132,14 @@ func signalingHandler(w http.ResponseWriter, r *http.Request) {
     }
 }
 
-// indexHandler serves the main web UI page
+// indexHandler serves the main web UI page, injecting the wsPort into the client-side config.
 func indexHandler(w http.ResponseWriter, r *http.Request) {
     w.Header().Set("Content-Type", "text/html; charset=utf-8")
     portScript := fmt.Sprintf(`<script>window.config = { wsPort: %d };</script>`, wsPort)
     if _, err := w.Write([]byte(portScript)); err != nil {
         log.Printf("Error writing port script: %v", err)
     }
+
     data, err := embeddedFS.ReadFile("web/index.html")
     if err != nil {
         http.Error(w, "Index page not found", http.StatusInternalServerError)
