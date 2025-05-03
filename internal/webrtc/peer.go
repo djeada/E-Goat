@@ -185,3 +185,8 @@ func (p *Peer) close() {
         p.Conn.Close()
     })
 }
+
+// Close is the public method to tear down this Peer.
+func (p *Peer) Close() {
+    p.close()
+}
