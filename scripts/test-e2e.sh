@@ -179,6 +179,7 @@ if echo "$HISTORY_1" | grep -q "$TEST_MESSAGE_1"; then
 else
     echo -e "   ${RED}❌ Instance 1 cannot retrieve its own message${NC}"
     echo "   History: $HISTORY_1"
+    exit 1
 fi
 
 # Retrieve messages from instance 2
