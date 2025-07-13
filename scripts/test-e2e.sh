@@ -180,7 +180,6 @@ if echo "$TRANSPORT_STATUS_2" | grep -q "peer_id"; then
     echo -e "   ${GREEN}✅ Instance 2 transport layer responding${NC}"
     PEER_ID_TRANSPORT_2=$(echo "$TRANSPORT_STATUS_2" | grep -o '"peer_id":"[^"]*"' | cut -d'"' -f4 | tr -d '\n\r')
     echo "   Instance 2 peer ID: $PEER_ID_TRANSPORT_2"
-    echo "   Instance 2 peer ID: $PEER_ID_TRANSPORT_2"
 else
     echo -e "   ${RED}❌ Instance 2 transport layer not responding${NC}"
     echo "   Response: $TRANSPORT_STATUS_2"
