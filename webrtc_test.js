@@ -77,7 +77,7 @@ peer1.ws.on('error', (error) => {
 // Cleanup after 10 seconds
 setTimeout(() => {
     console.log('🧹 Cleaning up test connections...');
-    if (peer1.ws) peer1.ws.close();
-    if (peer2.ws) peer2.ws.close();
+    if (peer1.ws && peer1.ws.readyState === WebSocket.OPEN) peer1.ws.close();
+    if (peer2.ws && peer2.ws.readyState === WebSocket.OPEN) peer2.ws.close();
     process.exit(0);
 }, 10000);
