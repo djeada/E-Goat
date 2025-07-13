@@ -316,6 +316,7 @@ async function createPeerConnection(peerID, isInitiator = false) {
       if (signalingWS && signalingWS.readyState === WebSocket.OPEN) {
         signalingWS.send(JSON.stringify({
           peer_id: peerId,
+          target_peer_id: peerID,
           type: 'ice',
           payload: JSON.stringify(event.candidate)
         }));
@@ -400,6 +401,7 @@ async function createPeerConnection(peerID, isInitiator = false) {
       if (signalingWS && signalingWS.readyState === WebSocket.OPEN) {
         signalingWS.send(JSON.stringify({
           peer_id: peerId,
+          target_peer_id: peerID,
           type: 'offer',
           payload: JSON.stringify(offer)
         }));
@@ -507,6 +509,7 @@ async function handleOffer(peerID, offerData) {
   if (signalingWS && signalingWS.readyState === WebSocket.OPEN) {
     signalingWS.send(JSON.stringify({
       peer_id: peerId,
+      target_peer_id: peerID,
       type: 'answer',
       payload: JSON.stringify(answer)
     }));
