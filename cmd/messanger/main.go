@@ -20,6 +20,7 @@ import (
 
     "github.com/djeada/E-Goat/internal/storage"
     "github.com/djeada/E-Goat/internal/signaling"
+    "github.com/djeada/E-Goat/internal/transport"
 )
 
 var (
@@ -29,6 +30,10 @@ var (
     httpPort int
     wsPort   int
     dbPath   string
+    
+    // Global transport manager for the instance
+    globalTransport *transport.TransportManager
+    globalInstanceID string
 )
 
 func init() {
@@ -51,6 +56,31 @@ func main() {
     hub := signaling.NewHub(db)
     go hub.Run()
 
+    // 2.5. Initialize global transport manager
+    globalInstanceID = fmt.Sprintf("instance-%d", httpPort)
+    globalTransport = transport.NewTransportManager(globalInstanceID)
+    
+    // Set up transport message handlers
+    globalTransport.SetMessageHandler(func(msg transport.Message) {
+        log.Printf("🔄 Transport message from %s: %s", msg.From, string(msg.Data))
+        // Store transport messages in database
+        if err := storage.SaveMessage(db, "transport", msg.From, "transport", msg.Data, nil); err != nil {
+            log.Printf("Failed to save transport message: %v", err)
+        }
+    })
+    
+    globalTransport.SetConnectionHandler(func(peerID string, conn transport.Connection) {
+        log.Printf("🔗 Transport connected to %s via %s (quality: %d%%)", 
+            peerID, conn.Type(), conn.Quality())
+    })
+    
+    globalTransport.SetDisconnectHandler(func(peerID string, connType transport.ConnectionType) {
+        log.Printf("🔌 Transport disconnected from %s (was using %s)", peerID, connType)
+    })
+
+    // Note: Transport manager doesn't need explicit Start() - it's ready after creation
+    log.Printf("🚀 Transport manager initialized for peer: %s", globalInstanceID)
+
     // 3. Prepare embedded web assets
     contentFS, err := fs.Sub(embeddedFS, "web")
     if err != nil {
@@ -63,6 +93,9 @@ func main() {
     httpMux.HandleFunc("/", indexHandler)
     httpMux.HandleFunc("/history", historyHandler(db))
     httpMux.HandleFunc("/send", sendHandler(db))
+    httpMux.HandleFunc("/transport/connect", transportConnectHandler)
+    httpMux.HandleFunc("/transport/send", transportSendHandler)
+    httpMux.HandleFunc("/transport/status", transportStatusHandler)
 
     httpSrv := &http.Server{
         Addr:    fmt.Sprintf(":%d", httpPort),
@@ -195,4 +228,97 @@ func sendHandler(db *sql.DB) http.HandlerFunc {
         w.Header().Set("Content-Type", "application/json")
         json.NewEncoder(w).Encode(out{Timestamp: now})
     }
+}
+
+// transportConnectHandler initiates a transport connection to a peer
+func transportConnectHandler(w http.ResponseWriter, r *http.Request) {
+    if r.Method != http.MethodPost {
+        http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+        return
+    }
+    
+    type connectReq struct {
+        PeerID string `json:"peer_id"`
+        Room   string `json:"room"`
+    }
+    
+    var req connectReq
+    if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+        log.Printf("Transport connect JSON decode error: %v", err)
+        http.Error(w, fmt.Sprintf("bad JSON: %v", err), http.StatusBadRequest)
+        return
+    }
+    
+    if globalTransport == nil {
+        http.Error(w, "transport not initialized", http.StatusInternalServerError)
+        return
+    }
+    
+    // Attempt to connect using the layered transport system
+    go func() {
+        networkInfo := globalTransport.CreateNetworkInfo("", "", "")
+        if err := globalTransport.ConnectToPeer(req.PeerID, networkInfo); err != nil {
+            log.Printf("Failed to connect to peer %s: %v", req.PeerID, err)
+        }
+    }()
+    
+    w.Header().Set("Content-Type", "application/json")
+    json.NewEncoder(w).Encode(map[string]string{"status": "connecting"})
+}
+
+// transportSendHandler sends a message via the transport layer
+func transportSendHandler(w http.ResponseWriter, r *http.Request) {
+    if r.Method != http.MethodPost {
+        http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+        return
+    }
+    
+    type sendReq struct {
+        PeerID string `json:"peer_id"`
+        Text   string `json:"text"`
+        Room   string `json:"room"`
+    }
+    
+    var req sendReq
+    if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+        log.Printf("Transport send JSON decode error: %v", err)
+        http.Error(w, fmt.Sprintf("bad JSON: %v", err), http.StatusBadRequest)
+        return
+    }
+    
+    if globalTransport == nil {
+        http.Error(w, "transport not initialized", http.StatusInternalServerError)
+        return
+    }
+    
+    // Send via transport layer
+    if err := globalTransport.SendMessage(req.PeerID, "chat", []byte(req.Text)); err != nil {
+        http.Error(w, fmt.Sprintf("transport send error: %v", err), http.StatusInternalServerError)
+        return
+    }
+    
+    w.Header().Set("Content-Type", "application/json")
+    json.NewEncoder(w).Encode(map[string]string{"status": "sent"})
+}
+
+// transportStatusHandler returns the current transport status
+func transportStatusHandler(w http.ResponseWriter, r *http.Request) {
+    if r.Method != http.MethodGet {
+        http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+        return
+    }
+    
+    if globalTransport == nil {
+        http.Error(w, "transport not initialized", http.StatusInternalServerError)
+        return
+    }
+    
+    status := map[string]interface{}{
+        "peer_id": globalInstanceID,
+        "connections": globalTransport.GetAllConnectionsInfo(),
+        "available_transports": []string{"WebRTC_STUN", "WebRTC_TURN", "WebSocket", "HTTP_Polling", "LAN_Broadcast"},
+    }
+    
+    w.Header().Set("Content-Type", "application/json")
+    json.NewEncoder(w).Encode(status)
 }

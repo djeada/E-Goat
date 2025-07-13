@@ -28,6 +28,17 @@
   <div id="chat" class="hidden">
     <div id="room-info"></div>
 
+    <!-- Transport Layer Controls -->
+    <div id="transport-controls" class="transport-panel">
+      <h3>🔗 Transport Layer</h3>
+      <div id="transport-status" class="transport-status disconnected">Transport: disconnected | Peers: 0</div>
+      <div class="transport-buttons">
+        <button id="transport-toggle">Disable Transport</button>
+        <input id="peer-id-input" type="text" placeholder="Peer ID to connect">
+        <button id="connect-peer-btn">Connect to Peer</button>
+      </div>
+    </div>
+
     <div id="invitation-chat">
       <p>Invite link:</p>
       <textarea id="invite-text-chat" readonly rows="2"></textarea>

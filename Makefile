@@ -1,7 +1,7 @@
 # E-Goat Makefile
 # Simple automation for building and testing E-Goat
 
-.PHONY: help build test quick-test e2e-test clean install run dev verify all demo
+.PHONY: help build test quick-test e2e-test e2e-interactive clean install run dev verify all demo
 
 # Default target
 help:
@@ -13,7 +13,8 @@ help:
 	@echo "  verify       - Verify build and basic functionality"
 	@echo "  test         - Run all tests (build + quick test)"
 	@echo "  quick-test   - Run quick functionality test"
-	@echo "  e2e-test     - Run end-to-end communication test"
+	@echo "  e2e-test     - Run end-to-end communication test (automated)"
+	@echo "  e2e-interactive - Run end-to-end test with manual testing"
 	@echo "  clean        - Clean up build artifacts and test files"
 	@echo "  install      - Install dependencies and build"
 	@echo "  run          - Build and run E-Goat"
@@ -49,10 +50,15 @@ quick-test:
 	@echo "⚡ Running quick functionality test..."
 	./scripts/quick-test.sh
 
-# Run end-to-end communication test
+# Run end-to-end communication test (automated)
 e2e-test:
-	@echo "🔗 Running end-to-end test..."
+	@echo "🔗 Running end-to-end test (automated)..."
 	./scripts/test-e2e.sh
+
+# Run end-to-end test with interactive manual testing
+e2e-interactive:
+	@echo "🔗 Running end-to-end test (interactive)..."
+	./scripts/test-e2e.sh --interactive
 
 # Clean up everything
 clean:
