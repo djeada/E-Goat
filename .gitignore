@@ -35,6 +35,17 @@ MANIFEST
 pip-log.txt
 pip-delete-this-directory.txt
 
+# E-Goat build/test artifacts
+e-goat
+*.db
+*.log
+tmp/
+demo_chat_1.db
+demo_chat_2.db
+test_chat_1.db
+test_chat_2.db
+quick_test.db
+
 # Unit test / coverage reports
 htmlcov/
 .tox/

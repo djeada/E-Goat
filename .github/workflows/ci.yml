@@ -1,0 +1,47 @@
+name: E-Goat CI
+
+on:
+  push:
+    branches: [ master ]
+  pull_request:
+    branches: [ master ]
+
+jobs:
+  build-and-test:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: '1.21'
+
+      - name: Install dependencies
+        run: |
+          go mod tidy
+
+      - name: Build E-Goat
+        run: |
+          make build
+
+      - name: Run quick tests
+        run: |
+          make test
+
+      - name: Clean up artifacts
+        run: |
+          make clean
+
+      - name: Archive build logs and test databases (if any)
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: e-goat-artifacts
+          path: |
+            *.log
+            *.db
+            tmp/
+            scripts/*.log
+            scripts/*.db
