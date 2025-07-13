@@ -1,6 +1,63 @@
 # E-Goat
 
-E-Goat is a lightweight P2P messaging application packaged as a single static Go binary. It uses a minimal WebSocket “signaling” service to bootstrap WebRTC peer connections, and a simple HTTP+polling REST API for text chat fallback. All message history is kept in a local SQLite database (`chat.db`), so you can back up or migrate your chat log at any time.
+E-Goat is a lightweight P2P messaging application packaged as a single static Go binary. It uses a minimal WebSocket “signaling” service to bootstrap WebRTC peer connections, and a simple HTTP+polling REST API for text chat fallback. All mes## Building & Running
+
+### Quick Start
+```bash
+# Build and run basic tests
+make test
+
+# Build and run the application
+make run
+
+# Or manually:
+go build -o e-goat ./cmd/messanger
+./e-goat -http-port=8080 -ws-port=9000 -db=chat.db
+```
+
+### Testing & Verification
+
+E-Goat includes comprehensive testing scripts to verify build and end-to-end communication:
+
+```bash
+# Run all tests (recommended)
+make test
+
+# Build verification only
+make verify
+
+# Quick functionality test
+make quick-test
+
+# End-to-end communication test (starts 2 instances)
+make e2e-test
+
+# Clean up test artifacts
+make clean
+```
+
+**Available Scripts:**
+- `./scripts/build-verify.sh` - Verifies build and basic functionality
+- `./scripts/quick-test.sh` - Fast functionality test with single instance
+- `./scripts/test-e2e.sh` - Comprehensive E2E test with two communicating instances
+- `./scripts/run-tests.sh` - Main test runner with various options
+- `./scripts/cleanup.sh` - Cleans up test artifacts and processes
+
+**Script Options:**
+```bash
+# Run with options
+./scripts/run-tests.sh --quick           # Quick tests only
+./scripts/run-tests.sh --skip-e2e        # Skip end-to-end tests
+./scripts/run-tests.sh --interactive     # Interactive mode
+```
+
+### Manual Testing
+
+After running the E2E test script, you can manually test communication by opening:
+- Instance 1: http://localhost:8080/?room=test&peer_id=peer1
+- Instance 2: http://localhost:8081/?room=test&peer_id=peer2
+
+Open [http://localhost:8080](http://localhost:8080), create or join a room, copy the invite link, and share it. If your network is NAT'd without STUN/TURN, configure port-forwarding and firewall rules as above.s kept in a local SQLite database (`chat.db`), so you can back up or migrate your chat log at any time.
 ![e_goat](https://github.com/user-attachments/assets/9ac71bdd-1fe3-41b9-89c0-21de1e140ced)
 
 ## Features
