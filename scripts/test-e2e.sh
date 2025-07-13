@@ -191,6 +191,7 @@ if echo "$HISTORY_2" | grep -q "$TEST_MESSAGE_2"; then
 else
     echo -e "   ${RED}❌ Instance 2 cannot retrieve its own message${NC}"
     echo "   History: $HISTORY_2"
+    exit 1
 fi
 
 # Test cross-instance message retrieval (if they share storage mechanism)
