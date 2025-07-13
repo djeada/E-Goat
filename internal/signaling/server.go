@@ -71,6 +71,26 @@ func (h *Hub) Run() {
                 h.rooms[client.room] = conns
             }
             h.rooms[client.room][client] = true
+            
+            // Notify other clients in the room about new peer
+            if len(conns) > 0 {
+                joinNotification := map[string]interface{}{
+                    "type":    "peer_joined",
+                    "peer_id": client.peerID,
+                    "room":    client.room,
+                }
+                joinData, _ := json.Marshal(joinNotification)
+                
+                for existingClient := range conns {
+                    if existingClient.peerID != client.peerID {
+                        select {
+                        case existingClient.send <- joinData:
+                        default:
+                            log.Printf("Failed to notify %s about new peer %s", existingClient.peerID, client.peerID)
+                        }
+                    }
+                }
+            }
             h.mu.Unlock()
 
         case client := <-h.unregister:

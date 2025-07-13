@@ -13,6 +13,21 @@ let signalingWS = null;
 let useTransportLayer = true;
 let connectedPeers = new Set();
 let transportStatus = 'disconnected';
+let peerConnections = new Map(); // Store WebRTC peer connections
+let dataChannels = new Map(); // Store WebRTC data channels
+
+// WebRTC configuration with multiple STUN servers for better connectivity
+const rtcConfig = {
+  iceServers: [
+    { urls: 'stun:stun.l.google.com:19302' },
+    { urls: 'stun:stun1.l.google.com:19302' },
+    { urls: 'stun:stun2.l.google.com:19302' },
+    { urls: 'stun:stun.cloudflare.com:3478' },
+    { urls: 'stun:stun.nextcloud.com:443' }
+  ],
+  iceCandidatePoolSize: 10,
+  bundlePolicy: 'balanced'
+};
 
 window.addEventListener("load", () => {
   // Generate a unique ID for ourselves
@@ -114,18 +129,52 @@ async function sendMessage() {
   appendMessage("Me", text);
   input.value = "";
 
-  // Try transport layer first if available and connected
-  if (useTransportLayer && connectedPeers.size > 0) {
+  // Try WebRTC data channels first if available
+  if (useTransportLayer && dataChannels.size > 0) {
     try {
-      for (const peerID of connectedPeers) {
-        await sendViaTransport(peerID, text);
+      const message = JSON.stringify({ from: peerId, text: text });
+      let sent = false;
+      
+      console.log(`🚀 Attempting WebRTC send to ${dataChannels.size} channel(s)`);
+      
+      for (const [peerID, channel] of dataChannels) {
+        console.log(`📡 Channel ${peerID} state: ${channel.readyState}`);
+        if (channel.readyState === 'open') {
+          channel.send(message);
+          sent = true;
+          console.log(`✅ Message sent via WebRTC to ${peerID}`);
+        } else {
+          console.log(`⚠️  Channel ${peerID} not open (${channel.readyState})`);
+        }
       }
-      appendMessage("System", `📡 Sent via transport layer to ${connectedPeers.size} peer(s)`);
-      return;
+      
+      if (sent) {
+        appendMessage("System", `🚀 ✅ Sent via WebRTC to ${dataChannels.size} peer(s)`);
+        return;
+      } else {
+        throw new Error("No open data channels");
+      }
     } catch (e) {
-      console.error("Transport send failed, falling back to HTTP:", e);
-      appendMessage("System", "🔄 Transport failed, falling back to HTTP polling");
+      console.error("❌ WebRTC send failed, trying transport layer:", e);
+      appendMessage("System", `❌ WebRTC send failed: ${e.message}`);
+      
+      // Try transport layer REST API
+      if (connectedPeers.size > 0) {
+        try {
+          for (const peerID of connectedPeers) {
+            await sendViaTransport(peerID, text);
+          }
+          appendMessage("System", `📡 Sent via transport layer to ${connectedPeers.size} peer(s)`);
+          return;
+        } catch (e2) {
+          console.error("❌ Transport send failed, falling back to HTTP:", e2);
+          appendMessage("System", "🔄 Transport failed, falling back to HTTP polling");
+        }
+      }
     }
+  } else {
+    console.log(`⚠️  WebRTC not available: useTransportLayer=${useTransportLayer}, dataChannels=${dataChannels.size}`);
+    appendMessage("System", `⚠️  No WebRTC channels available, using fallback`);
   }
 
   // Fallback to HTTP polling
@@ -172,8 +221,16 @@ async function initializeTransport() {
     signalingWS.onmessage = (event) => {
       try {
         const signal = JSON.parse(event.data);
-        appendMessage("System", `📡 Signal from ${signal.peer_id}: ${signal.type}`);
-        handleSignalingMessage(signal);
+        console.log(`📡 Received signal from ${signal.peer_id}: ${signal.type}`);
+        
+        if (signal.type === 'peer_joined') {
+          // Auto-connect to new peers that join the room
+          appendMessage("System", `👋 ${signal.peer_id} joined the room`);
+          setTimeout(() => autoConnectToPeer(signal.peer_id), 1000);
+        } else {
+          appendMessage("System", `📡 Signal from ${signal.peer_id}: ${signal.type}`);
+          handleSignalingMessage(signal);
+        }
       } catch (e) {
         console.error("Signaling message error:", e);
       }
@@ -197,15 +254,280 @@ async function initializeTransport() {
   }
 }
 
+// Auto-connect to a peer when they join the room
+async function autoConnectToPeer(peerID) {
+  if (peerID === peerId || peerConnections.has(peerID)) {
+    return; // Don't connect to self or already connected peers
+  }
+  
+  try {
+    appendMessage("System", `🔄 Auto-connecting to ${peerID}...`);
+    await createPeerConnection(peerID, true); // We initiate the connection
+  } catch (e) {
+    console.error(`Auto-connect to ${peerID} failed:`, e);
+    appendMessage("System", `❌ Auto-connect to ${peerID} failed: ${e.message}`);
+  }
+}
+
 // Handle signaling messages for WebRTC setup
-function handleSignalingMessage(signal) {
-  // This would handle WebRTC offer/answer/ICE candidates
-  // For now, we'll simulate successful P2P connection
-  if (signal.type === 'offer') {
-    connectedPeers.add(signal.peer_id);
-    appendMessage("System", `🤝 P2P connection established with ${signal.peer_id}`);
-    transportStatus = 'connected';
+async function handleSignalingMessage(signal) {
+  try {
+    const peerID = signal.peer_id;
+    
+    if (signal.type === 'offer') {
+      // Handle incoming offer
+      await handleOffer(peerID, signal.payload);
+    } else if (signal.type === 'answer') {
+      // Handle incoming answer
+      await handleAnswer(peerID, signal.payload);
+    } else if (signal.type === 'ice') {
+      // Handle incoming ICE candidate
+      await handleIceCandidate(peerID, signal.payload);
+    }
+  } catch (e) {
+    console.error("Error handling signaling message:", e);
+    appendMessage("System", `❌ WebRTC error: ${e.message}`);
+  }
+}
+
+// Create a new peer connection with improved error handling
+async function createPeerConnection(peerID, isInitiator = false) {
+  console.log(`🔗 Creating peer connection to ${peerID}, initiator: ${isInitiator}`);
+  
+  const pc = new RTCPeerConnection(rtcConfig);
+  peerConnections.set(peerID, pc);
+  
+  // Set a timeout for connection attempts
+  const connectionTimeout = setTimeout(() => {
+    if (pc.connectionState !== 'connected') {
+      console.log(`⏰ Connection timeout for ${peerID}`);
+      appendMessage("System", `⏰ Connection timeout with ${peerID}, cleaning up...`);
+      pc.close();
+      peerConnections.delete(peerID);
+      connectedPeers.delete(peerID);
+      updateTransportStatus();
+    }
+  }, 15000); // 15 second timeout
+  
+  // Handle ICE candidates
+  pc.onicecandidate = (event) => {
+    if (event.candidate) {
+      console.log(`🧊 ICE candidate for ${peerID}:`, event.candidate.candidate);
+      if (signalingWS && signalingWS.readyState === WebSocket.OPEN) {
+        signalingWS.send(JSON.stringify({
+          peer_id: peerId,
+          type: 'ice',
+          payload: JSON.stringify(event.candidate)
+        }));
+      }
+    } else {
+      console.log(`🧊 ICE gathering complete for ${peerID}`);
+    }
+  };
+  
+  // Handle ICE connection state changes
+  pc.oniceconnectionstatechange = () => {
+    console.log(`🧊 ICE connection state with ${peerID}: ${pc.iceConnectionState}`);
+    
+    if (pc.iceConnectionState === 'connected' || pc.iceConnectionState === 'completed') {
+      appendMessage("System", `🧊 ICE connected with ${peerID}`);
+      clearTimeout(connectionTimeout);
+    } else if (pc.iceConnectionState === 'failed') {
+      appendMessage("System", `❌ ICE connection failed with ${peerID}`);
+      clearTimeout(connectionTimeout);
+      // Clean up failed connection
+      setTimeout(() => {
+        pc.close();
+        peerConnections.delete(peerID);
+        connectedPeers.delete(peerID);
+        updateTransportStatus();
+      }, 1000);
+    }
+  };
+  
+  // Handle incoming data channel
+  pc.ondatachannel = (event) => {
+    const channel = event.channel;
+    console.log(`📡 Received data channel from ${peerID}`);
+    setupDataChannel(peerID, channel);
+  };
+  
+  // Handle connection state changes
+  pc.onconnectionstatechange = () => {
+    console.log(`🔗 WebRTC connection state with ${peerID}: ${pc.connectionState}`);
+    appendMessage("System", `🔗 WebRTC ${pc.connectionState} with ${peerID}`);
+    
+    if (pc.connectionState === 'connected') {
+      appendMessage("System", `🚀 WebRTC P2P connected to ${peerID}`);
+      connectedPeers.add(peerID);
+      transportStatus = 'connected';
+      clearTimeout(connectionTimeout);
+      updateTransportStatus();
+    } else if (pc.connectionState === 'disconnected' || pc.connectionState === 'failed') {
+      connectedPeers.delete(peerID);
+      clearTimeout(connectionTimeout);
+      updateTransportStatus();
+      
+      if (pc.connectionState === 'failed') {
+        appendMessage("System", `❌ WebRTC connection to ${peerID} failed`);
+        // Clean up after failure
+        setTimeout(() => {
+          pc.close();
+          peerConnections.delete(peerID);
+        }, 1000);
+      }
+    }
+  };
+  
+  // If we're the initiator, create a data channel
+  if (isInitiator) {
+    console.log(`📡 Creating data channel as initiator for ${peerID}`);
+    const channel = pc.createDataChannel('chat', { 
+      ordered: true,
+      maxRetransmits: 3
+    });
+    setupDataChannel(peerID, channel);
+    
+    // Create and send offer
+    try {
+      const offer = await pc.createOffer({
+        offerToReceiveAudio: false,
+        offerToReceiveVideo: false
+      });
+      await pc.setLocalDescription(offer);
+      
+      console.log(`📤 Sending offer to ${peerID}`);
+      if (signalingWS && signalingWS.readyState === WebSocket.OPEN) {
+        signalingWS.send(JSON.stringify({
+          peer_id: peerId,
+          type: 'offer',
+          payload: JSON.stringify(offer)
+        }));
+      }
+    } catch (e) {
+      console.error(`Failed to create offer for ${peerID}:`, e);
+      clearTimeout(connectionTimeout);
+      throw e;
+    }
+  }
+  
+  return pc;
+}
+
+// Setup data channel for messaging with improved state handling
+function setupDataChannel(peerID, channel) {
+  console.log(`📡 Setting up data channel with ${peerID}, initial state: ${channel.readyState}`);
+  dataChannels.set(peerID, channel);
+  
+  // Add buffered amount tracking
+  let lastBufferedAmount = 0;
+  const bufferThreshold = 16384; // 16KB
+  
+  channel.onopen = () => {
+    console.log(`📡 Data channel opened with ${peerID}`);
+    appendMessage("System", `📡 ✅ Data channel ready with ${peerID} - WebRTC P2P active!`);
     updateTransportStatus();
+    
+    // Send a test message to verify the channel
+    try {
+      const testMessage = JSON.stringify({ 
+        from: peerId, 
+        text: `🔧 Connection test from ${peerId}`,
+        type: 'test'
+      });
+      channel.send(testMessage);
+      console.log(`✅ Test message sent to ${peerID}`);
+    } catch (e) {
+      console.warn(`Test message failed to ${peerID}:`, e);
+    }
+  };
+  
+  channel.onmessage = (event) => {
+    console.log(`📨 Received WebRTC message from ${peerID}:`, event.data);
+    try {
+      const message = JSON.parse(event.data);
+      
+      if (message.type === 'test') {
+        appendMessage("System", `🔧 ✅ Connection test from ${peerID} successful`);
+        return;
+      }
+      
+      // Regular message
+      appendMessage(message.from || peerID, message.text);
+      appendMessage("System", `📨 ✅ Message via WebRTC from ${peerID}`);
+    } catch (e) {
+      console.error("Error parsing data channel message:", e);
+      appendMessage("System", `❌ Message parse error from ${peerID}`);
+    }
+  };
+  
+  channel.onerror = (error) => {
+    console.error(`❌ Data channel error with ${peerID}:`, error);
+    appendMessage("System", `❌ Data channel error with ${peerID}: ${error.type || 'unknown'}`);
+  };
+  
+  channel.onclose = () => {
+    console.log(`📡 Data channel closed with ${peerID}`);
+    appendMessage("System", `📡 Data channel closed with ${peerID}`);
+    dataChannels.delete(peerID);
+    updateTransportStatus();
+  };
+  
+  // Monitor buffer state
+  const checkBuffer = () => {
+    if (channel.readyState === 'open') {
+      const bufferedAmount = channel.bufferedAmount;
+      if (bufferedAmount > bufferThreshold && bufferedAmount > lastBufferedAmount) {
+        console.warn(`⚠️  High buffer amount for ${peerID}: ${bufferedAmount} bytes`);
+      }
+      lastBufferedAmount = bufferedAmount;
+    }
+  };
+  
+  // Check buffer every 5 seconds
+  const bufferInterval = setInterval(checkBuffer, 5000);
+  
+  // Clean up interval when channel closes
+  const originalOnClose = channel.onclose;
+  channel.onclose = (event) => {
+    clearInterval(bufferInterval);
+    if (originalOnClose) originalOnClose(event);
+  };
+}
+
+// Handle incoming offer
+async function handleOffer(peerID, offerData) {
+  const offer = JSON.parse(offerData);
+  const pc = await createPeerConnection(peerID, false);
+  
+  await pc.setRemoteDescription(offer);
+  const answer = await pc.createAnswer();
+  await pc.setLocalDescription(answer);
+  
+  if (signalingWS && signalingWS.readyState === WebSocket.OPEN) {
+    signalingWS.send(JSON.stringify({
+      peer_id: peerId,
+      type: 'answer',
+      payload: JSON.stringify(answer)
+    }));
+  }
+}
+
+// Handle incoming answer
+async function handleAnswer(peerID, answerData) {
+  const answer = JSON.parse(answerData);
+  const pc = peerConnections.get(peerID);
+  if (pc) {
+    await pc.setRemoteDescription(answer);
+  }
+}
+
+// Handle incoming ICE candidate
+async function handleIceCandidate(peerID, candidateData) {
+  const candidate = JSON.parse(candidateData);
+  const pc = peerConnections.get(peerID);
+  if (pc) {
+    await pc.addIceCandidate(candidate);
   }
 }
 
@@ -233,6 +555,12 @@ async function connectToPeer() {
   }
   
   try {
+    appendMessage("System", `🔄 Initiating WebRTC connection to ${targetPeerID}...`);
+    
+    // Create WebRTC peer connection as initiator
+    await createPeerConnection(targetPeerID, true);
+    
+    // Also try transport layer connection
     const res = await fetch(`${httpOrigin}/transport/connect`, {
       method: "POST", 
       headers: { "Content-Type": "application/json" },
@@ -240,16 +568,6 @@ async function connectToPeer() {
     });
     
     if (!res.ok) throw new Error(res.statusText);
-    
-    appendMessage("System", `🔄 Connecting to peer ${targetPeerID}...`);
-    
-    // Simulate connection after delay
-    setTimeout(() => {
-      connectedPeers.add(targetPeerID);
-      appendMessage("System", `✅ Connected to ${targetPeerID} via layered transport`);
-      transportStatus = 'connected';
-      updateTransportStatus();
-    }, 2000);
     
   } catch (e) {
     appendMessage("System", `❌ Connection failed: ${e.message}`);
@@ -278,7 +596,52 @@ function toggleTransport() {
 function updateTransportStatus() {
   const statusElement = document.getElementById("transport-status");
   if (statusElement) {
-    statusElement.textContent = `Transport: ${transportStatus} | Peers: ${connectedPeers.size}`;
+    // Count open WebRTC channels
+    let openChannels = 0;
+    for (const [peerID, channel] of dataChannels) {
+      if (channel.readyState === 'open') {
+        openChannels++;
+      }
+    }
+    
+    statusElement.textContent = `Transport: ${transportStatus} | Peers: ${connectedPeers.size} | WebRTC Channels: ${openChannels}/${dataChannels.size}`;
     statusElement.className = `transport-status ${transportStatus}`;
+    
+    // Update peer ID display
+    const peerIdElement = document.getElementById("my-peer-id");
+    if (peerIdElement) {
+      peerIdElement.textContent = peerId;
+    }
+    
+    // Update connected peers list
+    const peersListElement = document.getElementById("connected-peers-list");
+    if (peersListElement) {
+      peersListElement.textContent = connectedPeers.size > 0 ? Array.from(connectedPeers).join(", ") : "None";
+    }
+    
+    // Update WebRTC channels info
+    const channelsElement = document.getElementById("webrtc-channels-list");
+    if (channelsElement) {
+      const channelInfo = [];
+      for (const [peerID, channel] of dataChannels) {
+        channelInfo.push(`${peerID.substring(0,8)}...: ${channel.readyState}`);
+      }
+      channelsElement.textContent = channelInfo.length > 0 ? channelInfo.join(", ") : "None";
+    }
+    
+    // Update connection quality
+    const qualityElement = document.getElementById("connection-quality");
+    if (qualityElement) {
+      if (openChannels > 0) {
+        qualityElement.textContent = `P2P Active (${openChannels} WebRTC channels)`;
+        qualityElement.style.color = "green";
+      } else if (connectedPeers.size > 0) {
+        qualityElement.textContent = "Transport Layer (fallback)";
+        qualityElement.style.color = "orange";
+      } else {
+        qualityElement.textContent = "HTTP Polling Only";
+        qualityElement.style.color = "red";
+      }
+    }
   }
 }

@@ -37,6 +37,15 @@
         <input id="peer-id-input" type="text" placeholder="Peer ID to connect">
         <button id="connect-peer-btn">Connect to Peer</button>
       </div>
+      
+      <!-- Diagnostic Information -->
+      <div class="diagnostic-info" style="margin-top: 10px; padding: 10px; background: #f5f5f5; border-radius: 5px;">
+        <h4>🔍 Debug Information</h4>
+        <div><strong>Your Peer ID:</strong> <span id="my-peer-id">Loading...</span></div>
+        <div><strong>Connected Peers:</strong> <span id="connected-peers-list">None</span></div>
+        <div><strong>WebRTC Channels:</strong> <span id="webrtc-channels-list">None</span></div>
+        <div><strong>Connection Quality:</strong> <span id="connection-quality">Checking...</span></div>
+      </div>
     </div>
 
     <div id="invitation-chat">
