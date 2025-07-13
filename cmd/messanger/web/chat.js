@@ -4,7 +4,7 @@
 const httpOrigin = location.origin;
 const wsOrigin = `${location.protocol === 'https:' ? 'wss' : 'ws'}://${location.hostname}:9000`;
 
-let room, peerId, myIP;
+let room, peerId;
 let pollInterval;
 let lastTs = 0;  // UNIX timestamp of the last‐seen message
 
