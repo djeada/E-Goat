@@ -68,6 +68,7 @@ Comprehensive test that starts two instances and tests communication between the
 - Tests REST API communication between instances
 - Tests message persistence
 - Tests UI accessibility
+- Tests connection scenarios (different network conditions)
 - Keeps instances running for manual testing
 
 **Usage:**
@@ -180,6 +181,36 @@ Temporary databases created during testing:
 - `quick_test.db`: Quick test database
 
 These are automatically cleaned up after tests complete.
+
+## 🧪 Unit Tests
+
+### Location: `/tests/`
+Unit tests for core functionality, particularly the layered transport architecture.
+
+**Available Tests:**
+- `transport_test.go`: Tests for the layered connection system
+
+**Running Unit Tests:**
+```bash
+# Run all unit tests
+go test ./tests/...
+
+# Run with verbose output
+go test -v ./tests/...
+
+# Run specific test
+go test -v ./tests/ -run TestConnectionInterface
+
+# Run tests with coverage
+go test -cover ./tests/...
+```
+
+**What the tests cover:**
+- Connection interface implementations
+- Factory pattern functionality  
+- Priority ordering validation
+- Transport manager initialization
+- Connection quality metrics
 
 ## Integration with CI/CD
 
