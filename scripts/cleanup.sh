@@ -57,7 +57,7 @@ fi
 echo "🗑️  Cleaning up test artifacts..."
 
 # Remove test databases
-TEST_DBS=("test_chat_1.db" "test_chat_2.db" "chat.db")
+TEST_DBS=("test_chat_1.db" "test_chat_2.db" "chat.db" "quick_test.db")
 for db in "${TEST_DBS[@]}"; do
     if [ -f "$db" ]; then
         echo "  Removing $db..."
