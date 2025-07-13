@@ -52,17 +52,17 @@ while [[ $# -gt 0 ]]; do
             echo "Usage: $0 [OPTIONS]"
             echo ""
             echo "Options:"
-            echo "  --quick       Run only quick tests"
-            echo "  --skip-build  Skip build verification"
-            echo "  --skip-e2e    Skip end-to-end tests"
-            echo "  --interactive Run in interactive mode"
-            echo "  -h, --help    Show this help message"
+            echo "  --quick         Run only quick tests"
+            echo "  --skip-build    Skip build verification"
+            echo "  --skip-e2e      Skip end-to-end tests"
+            echo "  --interactive   Run in interactive mode"
+            echo "  -h, --help      Show this help message"
             echo ""
             echo "Examples:"
-            echo "  $0                    # Run all tests"
-            echo "  $0 --quick           # Run only quick tests"
-            echo "  $0 --skip-e2e        # Run build verification but skip e2e"
-            echo "  $0 --interactive     # Run with user prompts"
+            echo "  $0                     # Run all tests"
+            echo "  $0 --quick            # Run only quick tests"
+            echo "  $0 --skip-e2e         # Run build verification but skip e2e"
+            echo "  $0 --interactive      # Run with user prompts"
             exit 0
             ;;
         *)
@@ -198,7 +198,8 @@ else
     echo "Please review the test output above and fix any issues."
     echo "You can run individual test scripts for debugging:"
     echo "  ./scripts/build-verify.sh"
-    echo "  ./scripts/quick-test.sh"
+    echo "  ./scripts/quick-test.sh" 
     echo "  ./scripts/test-e2e.sh"
+    echo "  go test ./tests/... (unit tests)"
     exit 1
 fi
