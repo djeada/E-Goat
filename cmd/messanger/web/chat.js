@@ -2,7 +2,7 @@
 
 // We support both HTTP polling and WebRTC connections
 const httpOrigin = location.origin;
-const wsOrigin = location.origin.replace('http', 'ws').replace(':8080', ':9000');
+const wsOrigin = `${location.protocol === 'https:' ? 'wss' : 'ws'}://${location.hostname}:9000`;
 
 let room, peerId, myIP;
 let pollInterval;
