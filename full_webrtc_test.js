@@ -126,7 +126,11 @@ setTimeout(() => {
     console.log('');
     console.log('🧹 Cleaning up...');
     
-    if (peer1.ws) peer1.ws.close();
-    if (peer2.ws) peer2.ws.close();
+    if (peer1.ws && (peer1.ws.readyState === WebSocket.OPEN || peer1.ws.readyState === WebSocket.CLOSING)) {
+        peer1.ws.close();
+    }
+    if (peer2.ws && (peer2.ws.readyState === WebSocket.OPEN || peer2.ws.readyState === WebSocket.CLOSING)) {
+        peer2.ws.close();
+    }
     process.exit(0);
 }, 15000);
