@@ -1,0 +1,18 @@
+{
+  "name": "e-goat",
+  "version": "1.0.0",
+  "description": "E-Goat is a lightweight P2P messaging application built in Go that supports multiple connection types with automatic fallback. It combines WebRTC peer-to-peer connections, WebSocket communication, and HTTP polling to ensure reliable connectivity across different network environments.",
+  "main": "webrtc_test.js",
+  "directories": {
+    "test": "tests"
+  },
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "dependencies": {
+    "ws": "^8.18.3"
+  }
+}
