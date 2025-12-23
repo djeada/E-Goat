@@ -71,22 +71,22 @@ func (h *Hub) Run() {
             }
             
             // Notify the new peer about all existing peers in the room
-            if len(conns) > 0 {
-                for existingClient := range conns {
-                    if existingClient.peerID != client.peerID {
-                        existingPeerNotification := map[string]interface{}{
-                            "type":    "peer_joined",
-                            "peer_id": existingClient.peerID,
-                            "room":    client.room,
-                        }
-                        existingPeerData, _ := json.Marshal(existingPeerNotification)
-                        select {
-                        case client.send <- existingPeerData:
-                            log.Printf("✅ Notified new peer %s about existing peer %s", client.peerID, existingClient.peerID)
-                        default:
-                            log.Printf("❌ Failed to notify new peer %s about existing peer %s", client.peerID, existingClient.peerID)
-                        }
-                    }
+            for existingClient := range conns {
+                existingPeerNotification := map[string]interface{}{
+                    "type":    "peer_joined",
+                    "peer_id": existingClient.peerID,
+                    "room":    client.room,
+                }
+                existingPeerData, err := json.Marshal(existingPeerNotification)
+                if err != nil {
+                    log.Printf("❌ Failed to marshal notification for new peer %s about existing peer %s: %v", client.peerID, existingClient.peerID, err)
+                    continue
+                }
+                select {
+                case client.send <- existingPeerData:
+                    log.Printf("✅ Notified new peer %s about existing peer %s", client.peerID, existingClient.peerID)
+                default:
+                    log.Printf("❌ Failed to notify new peer %s about existing peer %s", client.peerID, existingClient.peerID)
                 }
             }
             
@@ -99,7 +99,12 @@ func (h *Hub) Run() {
                 "peer_id": client.peerID,
                 "room":    client.room,
             }
-            joinData, _ := json.Marshal(joinNotification)
+            joinData, err := json.Marshal(joinNotification)
+            if err != nil {
+                log.Printf("❌ Failed to marshal join notification for peer %s: %v", client.peerID, err)
+                h.mu.Unlock()
+                return
+            }
             
             for existingClient := range conns {
                 if existingClient.peerID != client.peerID {
