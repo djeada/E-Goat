@@ -57,6 +57,20 @@ window.addEventListener("load", () => {
           .addEventListener("click", toggleTransport);
   document.getElementById("connect-peer-btn")
           .addEventListener("click", connectToPeer);
+  
+  // Keyboard shortcuts
+  document.getElementById("room-input")
+          .addEventListener("keypress", (e) => {
+            if (e.key === "Enter") joinRoom();
+          });
+  document.getElementById("msg-input")
+          .addEventListener("keypress", (e) => {
+            if (e.key === "Enter") sendMessage();
+          });
+  document.getElementById("peer-id-input")
+          .addEventListener("keypress", (e) => {
+            if (e.key === "Enter") connectToPeer();
+          });
 });
 
 // 1 Get your external IP for display
@@ -87,7 +101,12 @@ function joinRoom() {
   // Swap to chat UI
   document.getElementById("init").classList.add("hidden");
   document.getElementById("chat").classList.remove("hidden");
-  document.getElementById("room-info").textContent = `Room: ${room}`;
+  
+  // Update room name display (new modern UI)
+  const roomNameDisplay = document.getElementById("room-name-display");
+  if (roomNameDisplay) {
+    roomNameDisplay.textContent = room;
+  }
 
   // Start polling for new messages once per second
   pollHistory();
@@ -110,6 +129,8 @@ async function pollHistory() {
     );
     if (!res.ok) throw new Error(res.statusText);
     const messages = await res.json();
+    // Handle null or non-array responses
+    if (!messages || !Array.isArray(messages)) return;
     for (const msg of messages) {
       appendMessage(msg.peer_id, msg.text);
       if (msg.timestamp > lastTs) lastTs = msg.timestamp;
@@ -607,19 +628,49 @@ function updateTransportStatus() {
       }
     }
     
-    statusElement.textContent = `Transport: ${transportStatus} | Peers: ${connectedPeers.size} | WebRTC Channels: ${openChannels}/${dataChannels.size}`;
+    // Build status message with icon
+    let statusIcon = '⚡';
+    let statusText = '';
+    
+    if (!useTransportLayer) {
+      statusIcon = '⏸️';
+      statusText = 'Transport Disabled';
+    } else if (openChannels > 0) {
+      statusIcon = '🚀';
+      statusText = `P2P Active • ${openChannels} WebRTC Channel${openChannels > 1 ? 's' : ''} • ${connectedPeers.size} Peer${connectedPeers.size > 1 ? 's' : ''}`;
+    } else if (transportStatus === 'signaling_connected') {
+      statusIcon = '🔄';
+      statusText = 'Signaling Connected • Waiting for peers...';
+    } else if (transportStatus === 'connected') {
+      statusIcon = '✅';
+      statusText = `Connected • ${connectedPeers.size} Peer${connectedPeers.size > 1 ? 's' : ''}`;
+    } else if (transportStatus === 'error') {
+      statusIcon = '❌';
+      statusText = 'Connection Error';
+    } else {
+      statusIcon = '📡';
+      statusText = 'Initializing...';
+    }
+    
+    statusElement.textContent = `${statusIcon} ${statusText}`;
     statusElement.className = `transport-status ${transportStatus}`;
     
-    // Update peer ID display
+    // Update peer ID display (truncated for readability)
     const peerIdElement = document.getElementById("my-peer-id");
     if (peerIdElement) {
-      peerIdElement.textContent = peerId;
+      peerIdElement.textContent = peerId ? `${peerId.substring(0, 8)}...` : 'Generating...';
+      peerIdElement.title = peerId; // Full ID on hover
     }
     
     // Update connected peers list
     const peersListElement = document.getElementById("connected-peers-list");
     if (peersListElement) {
-      peersListElement.textContent = connectedPeers.size > 0 ? Array.from(connectedPeers).join(", ") : "None";
+      if (connectedPeers.size > 0) {
+        const truncatedPeers = Array.from(connectedPeers).map(p => `${p.substring(0,8)}...`);
+        peersListElement.textContent = truncatedPeers.join(', ');
+      } else {
+        peersListElement.textContent = 'None';
+      }
     }
     
     // Update WebRTC channels info
@@ -627,23 +678,39 @@ function updateTransportStatus() {
     if (channelsElement) {
       const channelInfo = [];
       for (const [peerID, channel] of dataChannels) {
-        channelInfo.push(`${peerID.substring(0,8)}...: ${channel.readyState}`);
+        const stateEmoji = channel.readyState === 'open' ? '🟢' : 
+                           channel.readyState === 'connecting' ? '🟡' : '🔴';
+        channelInfo.push(`${stateEmoji} ${peerID.substring(0,6)}...`);
       }
-      channelsElement.textContent = channelInfo.length > 0 ? channelInfo.join(", ") : "None";
+      channelsElement.textContent = channelInfo.length > 0 ? channelInfo.join(' | ') : 'None';
     }
     
-    // Update connection quality
+    // Update connection quality with color-coded CSS
     const qualityElement = document.getElementById("connection-quality");
     if (qualityElement) {
       if (openChannels > 0) {
-        qualityElement.textContent = `P2P Active (${openChannels} WebRTC channels)`;
-        qualityElement.style.color = "green";
+        qualityElement.textContent = `🟢 P2P Active (${openChannels} channel${openChannels > 1 ? 's' : ''})`;
+        qualityElement.style.color = "#38ef7d";
       } else if (connectedPeers.size > 0) {
-        qualityElement.textContent = "Transport Layer (fallback)";
-        qualityElement.style.color = "orange";
+        qualityElement.textContent = "🟡 Transport Layer (fallback)";
+        qualityElement.style.color = "#f5576c";
+      } else if (transportStatus === 'signaling_connected') {
+        qualityElement.textContent = "🟡 Signaling Ready";
+        qualityElement.style.color = "#f5576c";
       } else {
-        qualityElement.textContent = "HTTP Polling Only";
-        qualityElement.style.color = "red";
+        qualityElement.textContent = "🔴 HTTP Polling Only";
+        qualityElement.style.color = "#ff416c";
+      }
+    }
+    
+    // Update room peer count
+    const peerCountElement = document.getElementById("room-peer-count");
+    if (peerCountElement) {
+      const totalPeers = connectedPeers.size;
+      if (totalPeers > 0) {
+        peerCountElement.textContent = `${totalPeers} peer${totalPeers > 1 ? 's' : ''} online`;
+      } else {
+        peerCountElement.textContent = 'Waiting for peers...';
       }
     }
   }

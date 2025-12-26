@@ -3,65 +3,120 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width,initial-scale=1.0">
+  <meta name="description" content="E-Goat - Secure P2P messaging with WebRTC">
+  <meta name="theme-color" content="#0f0f23">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
   <link rel="stylesheet" href="/static/styles.css">
-  <title>E-Goat Chat</title>
+  <title>E-Goat | Secure P2P Chat</title>
 </head>
 <body>
+  <!-- Init Screen -->
   <div id="init">
-    <h1>E-Goat Chat</h1>
-    <div class="field">
+    <div class="logo-container">
+      <div class="logo">🐐</div>
+      <div>
+        <h1 class="app-title">E-Goat</h1>
+        <p class="app-subtitle">Secure P2P Messaging</p>
+      </div>
+    </div>
+
+    <div class="field field-inline">
       <label>Your IP:</label>
-      <span id="my-ip">Loading…</span>
+      <div class="ip-badge">
+        <span class="status-dot"></span>
+        <span id="my-ip">Detecting...</span>
+      </div>
     </div>
+
     <div class="field">
-      <label for="room-input">Room name:</label>
-      <input id="room-input" type="text" placeholder="e.g. goats101">
+      <label for="room-input">Room Name</label>
+      <input id="room-input" type="text" placeholder="Enter room name (e.g. team-chat)" autocomplete="off">
     </div>
-    <button id="create-room-btn">Create / Join Room</button>
+
+    <button id="create-room-btn">
+      🚀 Create / Join Room
+    </button>
 
     <div id="invitation" class="hidden">
-      <p>Share this with your friend:</p>
+      <p>📨 Share this invite link:</p>
       <textarea id="invite-text" readonly rows="2"></textarea>
     </div>
   </div>
 
+  <!-- Chat Screen -->
   <div id="chat" class="hidden">
-    <div id="room-info"></div>
+    <!-- Room Header -->
+    <div id="room-info">
+      <div class="room-icon">💬</div>
+      <div class="room-details">
+        <div class="room-name" id="room-name-display">Room</div>
+        <div class="room-status">
+          <span class="online-dot"></span>
+          <span id="room-peer-count">Active</span>
+        </div>
+      </div>
+    </div>
 
     <!-- Transport Layer Controls -->
     <div id="transport-controls" class="transport-panel">
       <h3>🔗 Transport Layer</h3>
-      <div id="transport-status" class="transport-status disconnected">Transport: disconnected | Peers: 0</div>
+      <div id="transport-status" class="transport-status disconnected">
+        ⚡ Initializing transport...
+      </div>
       <div class="transport-buttons">
-        <button id="transport-toggle">Disable Transport</button>
-        <input id="peer-id-input" type="text" placeholder="Peer ID to connect">
-        <button id="connect-peer-btn">Connect to Peer</button>
+        <button id="transport-toggle" class="btn-secondary">
+          🔌 Disable Transport
+        </button>
+        <input id="peer-id-input" type="text" placeholder="Enter Peer ID to connect manually">
+        <button id="connect-peer-btn" class="btn-secondary">
+          🔗 Connect
+        </button>
       </div>
       
       <!-- Diagnostic Information -->
-      <div class="diagnostic-info" style="margin-top: 10px; padding: 10px; background: #f5f5f5; border-radius: 5px;">
-        <h4>🔍 Debug Information</h4>
-        <div><strong>Your Peer ID:</strong> <span id="my-peer-id">Loading...</span></div>
-        <div><strong>Connected Peers:</strong> <span id="connected-peers-list">None</span></div>
-        <div><strong>WebRTC Channels:</strong> <span id="webrtc-channels-list">None</span></div>
-        <div><strong>Connection Quality:</strong> <span id="connection-quality">Checking...</span></div>
+      <div class="diagnostic-info">
+        <h4>🔍 Connection Diagnostics</h4>
+        <div>
+          <strong>Your Peer ID:</strong>
+          <span id="my-peer-id">Generating...</span>
+        </div>
+        <div>
+          <strong>Connected Peers:</strong>
+          <span id="connected-peers-list">None</span>
+        </div>
+        <div>
+          <strong>WebRTC Channels:</strong>
+          <span id="webrtc-channels-list">None</span>
+        </div>
+        <div>
+          <strong>Connection Quality:</strong>
+          <span id="connection-quality">Checking...</span>
+        </div>
       </div>
     </div>
 
+    <!-- Invite Link -->
     <div id="invitation-chat">
-      <p>Invite link:</p>
+      <p>🔗 Invite Link</p>
       <textarea id="invite-text-chat" readonly rows="2"></textarea>
     </div>
 
+    <!-- Messages -->
     <div id="messages"></div>
+
+    <!-- Send Message -->
     <div class="send-field">
-      <input id="msg-input" type="text" placeholder="Type a message…">
-      <button id="send-btn">Send</button>
+      <input id="msg-input" type="text" placeholder="Type your message..." autocomplete="off">
+      <button id="send-btn">
+        📤 Send
+      </button>
     </div>
   </div>
 
   <script>
-    // injected by Go’s indexHandler
+    // injected by Go's indexHandler
     window.config = {
       wsPort:   {{.WsPort}},   // e.g. 9000
       httpPort: {{.HttpPort}}, // e.g. 8080
