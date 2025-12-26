@@ -4,6 +4,9 @@
 const httpOrigin = location.origin;
 const wsOrigin = `${location.protocol === 'https:' ? 'wss' : 'ws'}://${location.hostname}:9000`;
 
+// Display configuration
+const PEER_ID_TRUNCATE_LENGTH = 8; // Number of characters to show for truncated peer IDs
+
 let room, peerId;
 let pollInterval;
 let lastTs = 0;  // UNIX timestamp of the last‐seen message
@@ -658,7 +661,7 @@ function updateTransportStatus() {
     // Update peer ID display (truncated for readability)
     const peerIdElement = document.getElementById("my-peer-id");
     if (peerIdElement) {
-      peerIdElement.textContent = peerId ? `${peerId.substring(0, 8)}...` : 'Generating...';
+      peerIdElement.textContent = peerId ? `${peerId.substring(0, PEER_ID_TRUNCATE_LENGTH)}...` : 'Generating...';
       peerIdElement.title = peerId; // Full ID on hover
     }
     
@@ -666,7 +669,7 @@ function updateTransportStatus() {
     const peersListElement = document.getElementById("connected-peers-list");
     if (peersListElement) {
       if (connectedPeers.size > 0) {
-        const truncatedPeers = Array.from(connectedPeers).map(p => `${p.substring(0,8)}...`);
+        const truncatedPeers = Array.from(connectedPeers).map(p => `${p.substring(0, PEER_ID_TRUNCATE_LENGTH)}...`);
         peersListElement.textContent = truncatedPeers.join(', ');
       } else {
         peersListElement.textContent = 'None';
@@ -680,7 +683,7 @@ function updateTransportStatus() {
       for (const [peerID, channel] of dataChannels) {
         const stateEmoji = channel.readyState === 'open' ? '🟢' : 
                            channel.readyState === 'connecting' ? '🟡' : '🔴';
-        channelInfo.push(`${stateEmoji} ${peerID.substring(0,6)}...`);
+        channelInfo.push(`${stateEmoji} ${peerID.substring(0, PEER_ID_TRUNCATE_LENGTH - 2)}...`);
       }
       channelsElement.textContent = channelInfo.length > 0 ? channelInfo.join(' | ') : 'None';
     }

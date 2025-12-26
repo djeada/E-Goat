@@ -9,7 +9,7 @@
   --primary-gradient: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
   --secondary-gradient: linear-gradient(135deg, #f093fb 0%, #f5576c 100%);
   --success-gradient: linear-gradient(135deg, #11998e 0%, #38ef7d 100%);
-  --warning-gradient: linear-gradient(135deg, #f093fb 0%, #f5576c 100%);
+  --warning-gradient: linear-gradient(135deg, #f7971e 0%, #ffd200 100%);
   --error-gradient: linear-gradient(135deg, #ff416c 0%, #ff4b2b 100%);
   
   /* Background Colors */
@@ -100,7 +100,7 @@ body::before {
 }
 
 /* Utility Classes */
-.hidden { display: none !important; }
+.hidden { display: none; }
 
 /* App Container */
 .app-container {
