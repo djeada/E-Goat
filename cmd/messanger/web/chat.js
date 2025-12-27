@@ -260,8 +260,8 @@ async function sendMessage() {
   const text  = input.value.trim();
   if (!text) return;
 
-  // Optimistic UI
-  appendMessage("Me", text);
+  // Optimistic UI with proper "Me" styling
+  appendMessage("Me", text, { isMe: true });
   input.value = "";
 
   // Try WebRTC data channels first if available
@@ -1127,7 +1127,7 @@ function insertEmoji(emoji) {
 
 // Handle typing indicator
 function handleTyping() {
-  if (!signalingWS || signalingWS.readyState !== WebSocket.OPEN) return;
+  if (!signalingWS || signalingWS.readyState !== WebSocket.OPEN || !peerId) return;
   
   if (!isTyping) {
     isTyping = true;
@@ -1147,7 +1147,7 @@ function handleTyping() {
   // Set timeout to stop typing after 2 seconds of inactivity
   typingTimeout = setTimeout(() => {
     isTyping = false;
-    if (signalingWS && signalingWS.readyState === WebSocket.OPEN) {
+    if (signalingWS && signalingWS.readyState === WebSocket.OPEN && peerId) {
       signalingWS.send(JSON.stringify({
         peer_id: peerId,
         type: 'typing',
@@ -1163,7 +1163,7 @@ function showTypingIndicator(peerID, show) {
   const typingText = indicator?.querySelector(".typing-text");
   
   if (indicator && typingText) {
-    if (show) {
+    if (show && peerID) {
       typingText.textContent = `${peerID.substring(0, 8)}... is typing...`;
       indicator.classList.remove("hidden");
     } else {
@@ -1172,11 +1172,22 @@ function showTypingIndicator(peerID, show) {
   }
 }
 
+// Reusable audio context for notification sounds
+let audioContext = null;
+
 // Play notification sound for new messages
 function playNotificationSound() {
-  // Create a simple beep using Web Audio API
   try {
-    const audioContext = new (window.AudioContext || window.webkitAudioContext)();
+    // Create or reuse audio context
+    if (!audioContext) {
+      audioContext = new (window.AudioContext || window.webkitAudioContext)();
+    }
+    
+    // Resume context if suspended (browser autoplay policy)
+    if (audioContext.state === 'suspended') {
+      audioContext.resume();
+    }
+    
     const oscillator = audioContext.createOscillator();
     const gainNode = audioContext.createGain();
     
@@ -1195,21 +1206,4 @@ function playNotificationSound() {
     // Silently fail if audio context is not available
     console.log("Audio notification not available");
   }
-}
-
-// Format relative time (e.g., "2 minutes ago")
-function formatRelativeTime(timestamp) {
-  const now = Date.now();
-  const diff = now - timestamp;
-  
-  const seconds = Math.floor(diff / 1000);
-  const minutes = Math.floor(seconds / 60);
-  const hours = Math.floor(minutes / 60);
-  const days = Math.floor(hours / 24);
-  
-  if (days > 0) return `${days}d ago`;
-  if (hours > 0) return `${hours}h ago`;
-  if (minutes > 0) return `${minutes}m ago`;
-  if (seconds > 10) return `${seconds}s ago`;
-  return 'just now';
 }
