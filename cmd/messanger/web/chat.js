@@ -26,9 +26,27 @@ const publicBase = normalizePublicBase(config.publicBase);
 // Display configuration
 const PEER_ID_TRUNCATE_LENGTH = 8; // Number of characters to show for truncated peer IDs
 
+// Common emojis for the picker
+const EMOJI_LIST = [
+  '😀', '😃', '😄', '😁', '😆', '😅', '🤣', '😂',
+  '🙂', '😉', '😊', '😇', '🥰', '😍', '🤩', '😘',
+  '😋', '😛', '😜', '🤪', '😝', '🤑', '🤗', '🤔',
+  '🤐', '🤨', '😐', '😑', '😶', '😏', '😒', '🙄',
+  '😬', '😮', '🤯', '😱', '😨', '😰', '😥', '😢',
+  '😭', '😤', '😡', '🤬', '😈', '👿', '💀', '☠️',
+  '👋', '🤚', '🖐️', '✋', '🖖', '👌', '🤌', '🤏',
+  '✌️', '🤞', '🤟', '🤘', '🤙', '👈', '👉', '👆',
+  '👍', '👎', '✊', '👊', '🤛', '🤜', '👏', '🙌',
+  '❤️', '🧡', '💛', '💚', '💙', '💜', '🖤', '🤍',
+  '💯', '💢', '💥', '💫', '💦', '💨', '🔥', '⭐',
+  '🎉', '🎊', '🎁', '🎈', '🚀', '✨', '🌟', '💡'
+];
+
 let room, peerId;
 let pollInterval;
 let lastTs = 0;  // UNIX timestamp of the last‐seen message
+let typingTimeout = null;
+let isTyping = false;
 
 // WebRTC and Transport variables
 let signalingWS = null;
@@ -37,6 +55,7 @@ let connectedPeers = new Set();
 let transportStatus = 'disconnected';
 let peerConnections = new Map(); // Store WebRTC peer connections
 let dataChannels = new Map(); // Store WebRTC data channels
+let messageCount = 0; // Track messages for unique IDs
 
 // WebRTC configuration with multiple STUN servers for better connectivity
 const rtcConfig = {
@@ -86,6 +105,25 @@ window.addEventListener("load", () => {
   document.getElementById("transport-strategy-select")
           .addEventListener("change", updateApplyButtonState);
   
+  // Copy buttons
+  const copyBtn = document.getElementById("copy-invite-btn");
+  if (copyBtn) copyBtn.addEventListener("click", () => copyToClipboard("invite-text", copyBtn));
+  
+  const copyChatBtn = document.getElementById("copy-invite-chat-btn");
+  if (copyChatBtn) copyChatBtn.addEventListener("click", () => copyToClipboard("invite-text-chat", copyChatBtn));
+  
+  // Emoji picker
+  const emojiBtn = document.getElementById("emoji-btn");
+  if (emojiBtn) emojiBtn.addEventListener("click", toggleEmojiPicker);
+  
+  const closeEmojiBtn = document.getElementById("close-emoji-picker");
+  if (closeEmojiBtn) closeEmojiBtn.addEventListener("click", () => {
+    document.getElementById("emoji-picker").classList.add("hidden");
+  });
+  
+  // Initialize emoji grid
+  initializeEmojiPicker();
+  
   // Keyboard shortcuts
   document.getElementById("room-input")
           .addEventListener("keypress", (e) => {
@@ -95,10 +133,21 @@ window.addEventListener("load", () => {
           .addEventListener("keypress", (e) => {
             if (e.key === "Enter") sendMessage();
           });
+  document.getElementById("msg-input")
+          .addEventListener("input", handleTyping);
   document.getElementById("peer-id-input")
           .addEventListener("keypress", (e) => {
             if (e.key === "Enter") connectToPeer();
           });
+  
+  // Close emoji picker when clicking outside
+  document.addEventListener("click", (e) => {
+    const picker = document.getElementById("emoji-picker");
+    const emojiBtn = document.getElementById("emoji-btn");
+    if (picker && !picker.contains(e.target) && e.target !== emojiBtn) {
+      picker.classList.add("hidden");
+    }
+  });
 });
 
 // 1 Get your external IP for display
@@ -211,8 +260,8 @@ async function sendMessage() {
   const text  = input.value.trim();
   if (!text) return;
 
-  // Optimistic UI
-  appendMessage("Me", text);
+  // Optimistic UI with proper "Me" styling
+  appendMessage("Me", text, { isMe: true });
   input.value = "";
 
   // Try WebRTC data channels first if available
@@ -280,13 +329,94 @@ async function sendMessage() {
   }
 }
 
-// 5 Helper to append a line to the chat box
-function appendMessage(from, txt) {
+// 5 Helper to append a line to the chat box with enhanced formatting
+function appendMessage(from, txt, options = {}) {
   const container = document.getElementById("messages");
-  const line      = document.createElement("div");
-  line.textContent = `${from}: ${txt}`;
-  container.appendChild(line);
+  const { via = null, timestamp = null, isMe = false } = options;
+  
+  messageCount++;
+  
+  // Create message container
+  const messageDiv = document.createElement("div");
+  messageDiv.className = "message";
+  messageDiv.id = `msg-${messageCount}`;
+  
+  // Determine message type for styling
+  let avatarClass = "";
+  let senderClass = "";
+  let avatarContent = "";
+  
+  if (from === "Me" || isMe) {
+    avatarClass = "me";
+    senderClass = "me";
+    avatarContent = "👤";
+  } else if (from === "System") {
+    avatarClass = "system";
+    senderClass = "system";
+    avatarContent = "⚙️";
+  } else if (from === "Error") {
+    avatarClass = "error";
+    senderClass = "error";
+    avatarContent = "⚠️";
+  } else {
+    avatarContent = from.charAt(0).toUpperCase();
+    // Add webrtc class if sent via WebRTC
+    if (via === "webrtc") {
+      messageDiv.classList.add("webrtc");
+    }
+  }
+  
+  // Create avatar
+  const avatar = document.createElement("div");
+  avatar.className = `message-avatar ${avatarClass}`;
+  avatar.textContent = avatarContent;
+  
+  // Create content container
+  const content = document.createElement("div");
+  content.className = "message-content";
+  
+  // Create header with sender name and optional timestamp
+  const header = document.createElement("div");
+  header.className = "message-header";
+  
+  const sender = document.createElement("span");
+  sender.className = `message-sender ${senderClass}`;
+  sender.textContent = from;
+  header.appendChild(sender);
+  
+  // Add via indicator for WebRTC messages
+  if (via) {
+    const viaSpan = document.createElement("span");
+    viaSpan.className = "message-via";
+    viaSpan.textContent = via === "webrtc" ? "P2P" : via;
+    header.appendChild(viaSpan);
+  }
+  
+  // Add timestamp
+  const time = document.createElement("span");
+  time.className = "message-timestamp";
+  const now = timestamp ? new Date(timestamp * 1000) : new Date();
+  time.textContent = now.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+  header.appendChild(time);
+  
+  // Create message text
+  const text = document.createElement("div");
+  text.className = "message-text";
+  text.textContent = txt;
+  
+  // Assemble message
+  content.appendChild(header);
+  content.appendChild(text);
+  messageDiv.appendChild(avatar);
+  messageDiv.appendChild(content);
+  
+  container.appendChild(messageDiv);
   container.scrollTop = container.scrollHeight;
+  
+  // Play notification sound for incoming messages (not from Me or System)
+  if (from !== "Me" && from !== "System" && from !== "Error" && !isMe) {
+    playNotificationSound();
+  }
 }
 
 // === TRANSPORT LAYER FUNCTIONS ===
@@ -311,10 +441,21 @@ async function initializeTransport() {
         
         if (signal.type === 'peer_joined') {
           // Auto-connect to new peers that join the room
-          appendMessage("System", `👋 ${signal.peer_id} joined the room`);
+          appendMessage("System", `👋 ${signal.peer_id.substring(0, 8)}... joined the room`);
           setTimeout(() => autoConnectToPeer(signal.peer_id), 1000);
+        } else if (signal.type === 'typing') {
+          // Handle typing indicator
+          try {
+            const typingData = JSON.parse(signal.payload);
+            showTypingIndicator(signal.peer_id, typingData.typing);
+          } catch (e) {
+            console.error("Failed to parse typing signal:", e);
+          }
         } else {
-          appendMessage("System", `📡 Signal from ${signal.peer_id}: ${signal.type}`);
+          // Don't show verbose signal messages for offer/answer/ice
+          if (!['offer', 'answer', 'ice'].includes(signal.type)) {
+            appendMessage("System", `📡 Signal from ${signal.peer_id.substring(0, 8)}...: ${signal.type}`);
+          }
           handleSignalingMessage(signal);
         }
       } catch (e) {
@@ -347,11 +488,11 @@ async function autoConnectToPeer(peerID) {
   }
   
   try {
-    appendMessage("System", `🔄 Auto-connecting to ${peerID}...`);
+    appendMessage("System", `🔄 Auto-connecting to ${peerID.substring(0, 8)}...`);
     await createPeerConnection(peerID, true); // We initiate the connection
   } catch (e) {
     console.error(`Auto-connect to ${peerID} failed:`, e);
-    appendMessage("System", `❌ Auto-connect to ${peerID} failed: ${e.message}`);
+    appendMessage("System", `❌ Auto-connect to ${peerID.substring(0, 8)}... failed`);
   }
 }
 
@@ -387,7 +528,7 @@ async function createPeerConnection(peerID, isInitiator = false) {
   const connectionTimeout = setTimeout(() => {
     if (pc.connectionState !== 'connected') {
       console.log(`⏰ Connection timeout for ${peerID}`);
-      appendMessage("System", `⏰ Connection timeout with ${peerID}, cleaning up...`);
+      appendMessage("System", `⏰ Connection timeout with ${peerID.substring(0, 8)}...`);
       pc.close();
       peerConnections.delete(peerID);
       connectedPeers.delete(peerID);
@@ -417,10 +558,10 @@ async function createPeerConnection(peerID, isInitiator = false) {
     console.log(`🧊 ICE connection state with ${peerID}: ${pc.iceConnectionState}`);
     
     if (pc.iceConnectionState === 'connected' || pc.iceConnectionState === 'completed') {
-      appendMessage("System", `🧊 ICE connected with ${peerID}`);
+      appendMessage("System", `🧊 ICE connected with ${peerID.substring(0, 8)}...`);
       clearTimeout(connectionTimeout);
     } else if (pc.iceConnectionState === 'failed') {
-      appendMessage("System", `❌ ICE connection failed with ${peerID}`);
+      appendMessage("System", `❌ ICE connection failed with ${peerID.substring(0, 8)}...`);
       clearTimeout(connectionTimeout);
       // Clean up failed connection
       setTimeout(() => {
@@ -442,10 +583,13 @@ async function createPeerConnection(peerID, isInitiator = false) {
   // Handle connection state changes
   pc.onconnectionstatechange = () => {
     console.log(`🔗 WebRTC connection state with ${peerID}: ${pc.connectionState}`);
-    appendMessage("System", `🔗 WebRTC ${pc.connectionState} with ${peerID}`);
+    // Only show connecting state once, not every state change
+    if (pc.connectionState !== 'connecting') {
+      appendMessage("System", `🔗 WebRTC ${pc.connectionState} with ${peerID.substring(0, 8)}...`);
+    }
     
     if (pc.connectionState === 'connected') {
-      appendMessage("System", `🚀 WebRTC P2P connected to ${peerID}`);
+      appendMessage("System", `🚀 WebRTC P2P connected to ${peerID.substring(0, 8)}...`);
       connectedPeers.add(peerID);
       transportStatus = 'connected';
       clearTimeout(connectionTimeout);
@@ -456,7 +600,7 @@ async function createPeerConnection(peerID, isInitiator = false) {
       updateTransportStatus();
       
       if (pc.connectionState === 'failed') {
-        appendMessage("System", `❌ WebRTC connection to ${peerID} failed`);
+        appendMessage("System", `❌ WebRTC connection to ${peerID.substring(0, 8)}... failed`);
         // Clean up after failure
         setTimeout(() => {
           pc.close();
@@ -513,14 +657,14 @@ function setupDataChannel(peerID, channel) {
   
   channel.onopen = () => {
     console.log(`📡 Data channel opened with ${peerID}`);
-    appendMessage("System", `📡 ✅ Data channel ready with ${peerID} - WebRTC P2P active!`);
+    appendMessage("System", `📡 ✅ P2P channel ready with ${peerID.substring(0, 8)}... - WebRTC active!`);
     updateTransportStatus();
     
     // Send a test message to verify the channel
     try {
       const testMessage = JSON.stringify({ 
         from: peerId, 
-        text: `🔧 Connection test from ${peerId}`,
+        text: `🔧 Connection test`,
         type: 'test'
       });
       channel.send(testMessage);
@@ -536,27 +680,29 @@ function setupDataChannel(peerID, channel) {
       const message = JSON.parse(event.data);
       
       if (message.type === 'test') {
-        appendMessage("System", `🔧 ✅ Connection test from ${peerID} successful`);
+        appendMessage("System", `🔧 ✅ Connection test from ${peerID.substring(0, 8)}... successful`);
         return;
       }
       
-      // Regular message
-      appendMessage(message.from || peerID, message.text);
-      appendMessage("System", `📨 ✅ Message via WebRTC from ${peerID}`);
+      // Regular message with enhanced formatting
+      const senderName = message.from ? 
+        (message.from.length > 12 ? message.from.substring(0, 8) + '...' : message.from) : 
+        peerID.substring(0, 8) + '...';
+      appendMessage(senderName, message.text, { via: 'webrtc' });
     } catch (e) {
       console.error("Error parsing data channel message:", e);
-      appendMessage("System", `❌ Message parse error from ${peerID}`);
+      appendMessage("System", `❌ Message parse error from ${peerID.substring(0, 8)}...`);
     }
   };
   
   channel.onerror = (error) => {
     console.error(`❌ Data channel error with ${peerID}:`, error);
-    appendMessage("System", `❌ Data channel error with ${peerID}: ${error.type || 'unknown'}`);
+    appendMessage("System", `❌ Data channel error with ${peerID.substring(0, 8)}...`);
   };
   
   channel.onclose = () => {
     console.log(`📡 Data channel closed with ${peerID}`);
-    appendMessage("System", `📡 Data channel closed with ${peerID}`);
+    appendMessage("System", `📡 Data channel closed with ${peerID.substring(0, 8)}...`);
     dataChannels.delete(peerID);
     updateTransportStatus();
   };
@@ -904,5 +1050,160 @@ function updateInviteWarning() {
   } else {
     warning.textContent = "";
     warning.classList.add("hidden");
+  }
+}
+
+// === NEW ENHANCED FEATURES ===
+
+// Copy to clipboard functionality
+async function copyToClipboard(textareaId, button) {
+  const textarea = document.getElementById(textareaId);
+  if (!textarea) return;
+  
+  try {
+    await navigator.clipboard.writeText(textarea.value);
+    
+    // Visual feedback
+    const originalText = button.textContent;
+    button.textContent = "✅";
+    button.classList.add("copied");
+    
+    setTimeout(() => {
+      button.textContent = originalText;
+      button.classList.remove("copied");
+    }, 2000);
+  } catch (err) {
+    console.error("Failed to copy:", err);
+    // Fallback for older browsers
+    textarea.select();
+    document.execCommand('copy');
+    button.textContent = "✅";
+    setTimeout(() => {
+      button.textContent = "📋";
+    }, 2000);
+  }
+}
+
+// Initialize emoji picker
+function initializeEmojiPicker() {
+  const grid = document.getElementById("emoji-grid");
+  if (!grid) return;
+  
+  for (const emoji of EMOJI_LIST) {
+    const btn = document.createElement("button");
+    btn.className = "emoji-btn";
+    btn.textContent = emoji;
+    btn.addEventListener("click", () => insertEmoji(emoji));
+    grid.appendChild(btn);
+  }
+}
+
+// Toggle emoji picker visibility
+function toggleEmojiPicker() {
+  const picker = document.getElementById("emoji-picker");
+  if (picker) {
+    picker.classList.toggle("hidden");
+  }
+}
+
+// Insert emoji into message input
+function insertEmoji(emoji) {
+  const input = document.getElementById("msg-input");
+  if (input) {
+    const start = input.selectionStart;
+    const end = input.selectionEnd;
+    const value = input.value;
+    input.value = value.slice(0, start) + emoji + value.slice(end);
+    input.focus();
+    input.setSelectionRange(start + emoji.length, start + emoji.length);
+  }
+  
+  // Close picker after selection
+  const picker = document.getElementById("emoji-picker");
+  if (picker) {
+    picker.classList.add("hidden");
+  }
+}
+
+// Handle typing indicator
+function handleTyping() {
+  if (!signalingWS || signalingWS.readyState !== WebSocket.OPEN || !peerId) return;
+  
+  if (!isTyping) {
+    isTyping = true;
+    // Send typing start notification
+    signalingWS.send(JSON.stringify({
+      peer_id: peerId,
+      type: 'typing',
+      payload: JSON.stringify({ typing: true })
+    }));
+  }
+  
+  // Clear previous timeout
+  if (typingTimeout) {
+    clearTimeout(typingTimeout);
+  }
+  
+  // Set timeout to stop typing after 2 seconds of inactivity
+  typingTimeout = setTimeout(() => {
+    isTyping = false;
+    if (signalingWS && signalingWS.readyState === WebSocket.OPEN && peerId) {
+      signalingWS.send(JSON.stringify({
+        peer_id: peerId,
+        type: 'typing',
+        payload: JSON.stringify({ typing: false })
+      }));
+    }
+  }, 2000);
+}
+
+// Show typing indicator from another peer
+function showTypingIndicator(peerID, show) {
+  const indicator = document.getElementById("typing-indicator");
+  const typingText = indicator?.querySelector(".typing-text");
+  
+  if (indicator && typingText) {
+    if (show && peerID) {
+      typingText.textContent = `${peerID.substring(0, 8)}... is typing...`;
+      indicator.classList.remove("hidden");
+    } else {
+      indicator.classList.add("hidden");
+    }
+  }
+}
+
+// Reusable audio context for notification sounds
+let audioContext = null;
+
+// Play notification sound for new messages
+function playNotificationSound() {
+  try {
+    // Create or reuse audio context
+    if (!audioContext) {
+      audioContext = new (window.AudioContext || window.webkitAudioContext)();
+    }
+    
+    // Resume context if suspended (browser autoplay policy)
+    if (audioContext.state === 'suspended') {
+      audioContext.resume();
+    }
+    
+    const oscillator = audioContext.createOscillator();
+    const gainNode = audioContext.createGain();
+    
+    oscillator.connect(gainNode);
+    gainNode.connect(audioContext.destination);
+    
+    oscillator.frequency.value = 800; // Frequency in Hz
+    oscillator.type = 'sine';
+    
+    gainNode.gain.setValueAtTime(0.1, audioContext.currentTime);
+    gainNode.gain.exponentialRampToValueAtTime(0.01, audioContext.currentTime + 0.3);
+    
+    oscillator.start(audioContext.currentTime);
+    oscillator.stop(audioContext.currentTime + 0.3);
+  } catch (e) {
+    // Silently fail if audio context is not available
+    console.log("Audio notification not available");
   }
 }

@@ -10,6 +10,8 @@
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
   <link rel="stylesheet" href="/static/styles.css">
   <title>E-Goat | Secure P2P Chat</title>
+  <!-- Favicon -->
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🐐</text></svg>">
 </head>
 <body>
   <!-- Init Screen -->
@@ -42,7 +44,10 @@
 
     <div id="invitation" class="hidden">
       <p>📨 Share this invite link:</p>
-      <textarea id="invite-text" readonly rows="2"></textarea>
+      <div class="invite-container">
+        <textarea id="invite-text" readonly rows="2"></textarea>
+        <button id="copy-invite-btn" class="btn-copy" data-tooltip="Copy to clipboard">📋</button>
+      </div>
     </div>
   </div>
 
@@ -117,8 +122,17 @@
     <!-- Invite Link -->
   <div id="invitation-chat">
       <p>🔗 Invite Link</p>
-      <textarea id="invite-text-chat" readonly rows="2"></textarea>
+      <div class="invite-container">
+        <textarea id="invite-text-chat" readonly rows="2"></textarea>
+        <button id="copy-invite-chat-btn" class="btn-copy" data-tooltip="Copy to clipboard">📋</button>
+      </div>
       <div id="invite-warning" class="invite-warning hidden"></div>
+    </div>
+
+    <!-- Typing Indicator -->
+    <div id="typing-indicator" class="typing-indicator hidden">
+      <span></span><span></span><span></span>
+      <span class="typing-text">Someone is typing...</span>
     </div>
 
     <!-- Messages -->
@@ -126,10 +140,20 @@
 
     <!-- Send Message -->
     <div class="send-field">
+      <button id="emoji-btn" class="btn-icon btn-secondary" data-tooltip="Insert emoji">😀</button>
       <input id="msg-input" type="text" placeholder="Type your message..." autocomplete="off">
       <button id="send-btn">
         📤 Send
       </button>
+    </div>
+
+    <!-- Emoji Picker -->
+    <div id="emoji-picker" class="emoji-picker hidden">
+      <div class="emoji-picker-header">
+        <span>Pick an emoji</span>
+        <button id="close-emoji-picker" class="btn-close">✕</button>
+      </div>
+      <div class="emoji-grid" id="emoji-grid"></div>
     </div>
   </div>
 

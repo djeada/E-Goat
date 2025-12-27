@@ -100,7 +100,7 @@ body::before {
 }
 
 /* Utility Classes */
-.hidden { display: none; }
+.hidden { display: none !important; }
 
 /* App Container */
 .app-container {
@@ -815,6 +815,7 @@ button.btn-icon {
   border: 1px solid var(--border-color);
   border-radius: var(--radius-lg);
   transition: all var(--transition-normal);
+  position: relative;
 }
 
 .send-field:focus-within {
@@ -843,6 +844,183 @@ button.btn-icon {
 .send-field button:hover {
   transform: translateY(-1px);
   box-shadow: 0 4px 15px rgba(102, 126, 234, 0.4);
+}
+
+/* =====================================================
+   INVITE CONTAINER WITH COPY BUTTON
+   ===================================================== */
+
+.invite-container {
+  display: flex;
+  gap: var(--spacing-sm);
+  align-items: stretch;
+}
+
+.invite-container textarea {
+  flex: 1;
+}
+
+.btn-copy {
+  width: 44px;
+  height: auto;
+  padding: var(--spacing-sm);
+  background: var(--bg-glass);
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-md);
+  font-size: 1.2rem;
+  cursor: pointer;
+  transition: all var(--transition-normal);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.btn-copy:hover {
+  background: rgba(102, 126, 234, 0.2);
+  border-color: var(--accent-purple);
+  transform: scale(1.05);
+}
+
+.btn-copy.copied {
+  background: rgba(56, 239, 125, 0.2);
+  border-color: var(--accent-green);
+}
+
+.btn-close {
+  width: 28px;
+  height: 28px;
+  padding: 0;
+  background: var(--bg-glass);
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-full);
+  font-size: 0.875rem;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.btn-close:hover {
+  background: rgba(255, 65, 108, 0.2);
+  border-color: #ff416c;
+}
+
+/* =====================================================
+   EMOJI PICKER
+   ===================================================== */
+
+.emoji-picker {
+  position: fixed;
+  bottom: 100px;
+  left: 50%;
+  transform: translateX(-50%);
+  width: 320px;
+  max-height: 300px;
+  background: var(--bg-card);
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-soft), var(--shadow-glow);
+  z-index: 1000;
+  overflow: hidden;
+  animation: slideUp 0.2s ease-out;
+}
+
+@keyframes slideUp {
+  from {
+    opacity: 0;
+    transform: translateX(-50%) translateY(20px);
+  }
+  to {
+    opacity: 1;
+    transform: translateX(-50%) translateY(0);
+  }
+}
+
+.emoji-picker-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: var(--spacing-sm) var(--spacing-md);
+  border-bottom: 1px solid var(--border-color);
+  font-size: 0.875rem;
+  font-weight: 500;
+  color: var(--text-secondary);
+}
+
+.emoji-grid {
+  display: grid;
+  grid-template-columns: repeat(8, 1fr);
+  gap: 4px;
+  padding: var(--spacing-md);
+  max-height: 240px;
+  overflow-y: auto;
+}
+
+.emoji-btn {
+  width: 32px;
+  height: 32px;
+  padding: 0;
+  background: transparent;
+  border: none;
+  border-radius: var(--radius-sm);
+  font-size: 1.25rem;
+  cursor: pointer;
+  transition: all var(--transition-fast);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.emoji-btn:hover {
+  background: var(--bg-glass);
+  transform: scale(1.2);
+}
+
+/* =====================================================
+   ENHANCED MESSAGE STYLING
+   ===================================================== */
+
+.message-timestamp {
+  font-size: 0.7rem;
+  color: var(--text-muted);
+  margin-left: auto;
+  font-family: 'JetBrains Mono', monospace;
+}
+
+.message-delivery {
+  font-size: 0.75rem;
+  margin-left: var(--spacing-xs);
+}
+
+.message-delivery.sent {
+  color: var(--text-muted);
+}
+
+.message-delivery.delivered {
+  color: var(--accent-cyan);
+}
+
+.message-delivery.read {
+  color: var(--accent-green);
+}
+
+.message.webrtc .message-avatar {
+  background: var(--success-gradient);
+  box-shadow: 0 0 10px rgba(56, 239, 125, 0.3);
+}
+
+.message.http .message-avatar {
+  background: var(--warning-gradient);
+}
+
+.message-via {
+  font-size: 0.65rem;
+  color: var(--text-muted);
+  padding: 2px 6px;
+  background: var(--bg-glass);
+  border-radius: var(--radius-sm);
+  margin-left: var(--spacing-xs);
+  font-family: 'JetBrains Mono', monospace;
 }
 
 /* =====================================================
@@ -941,11 +1119,14 @@ button.btn-icon {
 .typing-indicator {
   display: flex;
   gap: 4px;
-  padding: var(--spacing-sm);
+  padding: var(--spacing-sm) var(--spacing-md);
   align-items: center;
+  background: var(--bg-glass);
+  border-radius: var(--radius-md);
+  margin-bottom: var(--spacing-sm);
 }
 
-.typing-indicator span {
+.typing-indicator span:not(.typing-text) {
   width: 8px;
   height: 8px;
   background: var(--text-muted);
@@ -959,6 +1140,16 @@ button.btn-icon {
 
 .typing-indicator span:nth-child(3) {
   animation-delay: 0.4s;
+}
+
+.typing-text {
+  margin-left: var(--spacing-sm);
+  font-size: 0.8rem;
+  color: var(--text-muted);
+  animation: none !important;
+  width: auto !important;
+  height: auto !important;
+  background: transparent !important;
 }
 
 @keyframes typingBounce {
