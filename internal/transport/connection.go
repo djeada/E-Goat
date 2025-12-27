@@ -79,11 +79,17 @@ type ConnectionFactory interface {
 	EstimateSuccess(peerID string, networkInfo map[string]interface{}) int
 }
 
+// ConnectionTypeProvider allows introspection of a factory's connection type.
+type ConnectionTypeProvider interface {
+	Type() ConnectionType
+}
+
 // LayeredConnectionManager manages multiple connection attempts with fallback
 type LayeredConnectionManager struct {
 	factories  []ConnectionFactory
 	connections map[string]*PeerConnection
 	mu         sync.RWMutex
+	allowedTypes map[ConnectionType]bool
 	
 	// Configuration
 	maxRetries        int
@@ -144,6 +150,43 @@ func (lcm *LayeredConnectionManager) RegisterFactory(factory ConnectionFactory) 
 	log.Printf("Registered connection factory with priority %d", factory.Priority())
 }
 
+// ListFactories returns a copy of registered factories in priority order.
+func (lcm *LayeredConnectionManager) ListFactories() []ConnectionFactory {
+	lcm.mu.RLock()
+	defer lcm.mu.RUnlock()
+
+	out := make([]ConnectionFactory, len(lcm.factories))
+	copy(out, lcm.factories)
+	return out
+}
+
+// SetAllowedTypes restricts which connection types may be attempted.
+// An empty slice means "allow all".
+func (lcm *LayeredConnectionManager) SetAllowedTypes(types []ConnectionType) {
+	lcm.mu.Lock()
+	defer lcm.mu.Unlock()
+
+	if len(types) == 0 {
+		lcm.allowedTypes = nil
+		return
+	}
+
+	lcm.allowedTypes = make(map[ConnectionType]bool, len(types))
+	for _, t := range types {
+		lcm.allowedTypes[t] = true
+	}
+}
+
+func (lcm *LayeredConnectionManager) isTypeAllowed(connType ConnectionType) bool {
+	lcm.mu.RLock()
+	defer lcm.mu.RUnlock()
+
+	if lcm.allowedTypes == nil {
+		return true
+	}
+	return lcm.allowedTypes[connType]
+}
+
 // ConnectToPeer attempts to connect to a peer using all available methods
 func (lcm *LayeredConnectionManager) ConnectToPeer(ctx context.Context, peerID string, networkInfo map[string]interface{}) error {
 	lcm.mu.Lock()
@@ -189,6 +232,13 @@ func (lcm *LayeredConnectionManager) attemptConnections(ctx context.Context, pee
 				}
 			}
 			
+			if provider, ok := f.(ConnectionTypeProvider); ok {
+				if !lcm.isTypeAllowed(provider.Type()) {
+					log.Printf("Skipping connection type %s due to strategy", provider.Type())
+					return
+				}
+			}
+
 			// Estimate success probability
 			successProb := f.EstimateSuccess(peerConn.PeerID, networkInfo)
 			if successProb < 10 { // Skip very unlikely connections

@@ -37,6 +37,10 @@ func (f *WebRTCSTUNFactory) CanCreate(connType ConnectionType) bool {
 	return connType == WebRTCSTUN
 }
 
+func (f *WebRTCSTUNFactory) Type() ConnectionType {
+	return WebRTCSTUN
+}
+
 func (f *WebRTCSTUNFactory) Priority() int {
 	return 100 // Highest priority - direct P2P
 }

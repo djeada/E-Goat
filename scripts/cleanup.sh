@@ -58,12 +58,17 @@ echo "🗑️  Cleaning up test artifacts..."
 
 # Remove test databases
 TEST_DBS=("test_chat_1.db" "test_chat_2.db" "chat.db" "quick_test.db")
+DEFAULT_DB="${HOME:-}/tmp/e-goat/chat.db"
 for db in "${TEST_DBS[@]}"; do
     if [ -f "$db" ]; then
         echo "  Removing $db..."
         rm -f "$db"
     fi
 done
+if [ -n "${HOME:-}" ] && [ -f "$DEFAULT_DB" ]; then
+    echo "  Removing $DEFAULT_DB..."
+    rm -f "$DEFAULT_DB"
+fi
 
 # Remove any temporary files
 if [ -d "tmp" ]; then
@@ -130,6 +135,9 @@ for db in "${TEST_DBS[@]}"; do
         DB_CHECK="$DB_CHECK $db"
     fi
 done
+if [ -n "${HOME:-}" ] && [ -f "$DEFAULT_DB" ]; then
+    DB_CHECK="$DB_CHECK $DEFAULT_DB"
+fi
 
 if [ -n "$DB_CHECK" ]; then
     echo -e "${YELLOW}⚠️  Some test databases still exist:$DB_CHECK${NC}"

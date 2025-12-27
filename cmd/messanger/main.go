@@ -12,6 +12,7 @@ import (
     "net/http"
     "os"
     "os/signal"
+    "path/filepath"
     "strconv"
     "syscall"
     "time"
@@ -30,6 +31,7 @@ var (
     httpPort int
     wsPort   int
     dbPath   string
+    publicBase string
     
     // Global transport manager for the instance
     globalTransport *transport.TransportManager
@@ -39,7 +41,16 @@ var (
 func init() {
     flag.IntVar(&httpPort, "http-port", 8080, "Port for HTTP server (UI + polling endpoints)")
     flag.IntVar(&wsPort, "ws-port", 9000, "Port for signaling WebSocket server")
-    flag.StringVar(&dbPath, "db", "chat.db", "Path to SQLite database file")
+    flag.StringVar(&dbPath, "db", defaultDBPath(), "Path to SQLite database file")
+    flag.StringVar(&publicBase, "public-base", os.Getenv("EGOAT_PUBLIC_BASE"), "Public base URL for invite links (optional)")
+}
+
+func defaultDBPath() string {
+    home, err := os.UserHomeDir()
+    if err != nil || home == "" {
+        return "chat.db"
+    }
+    return filepath.Join(home, "tmp", "e-goat", "chat.db")
 }
 
 func main() {
@@ -96,6 +107,8 @@ func main() {
     httpMux.HandleFunc("/transport/connect", transportConnectHandler)
     httpMux.HandleFunc("/transport/send", transportSendHandler)
     httpMux.HandleFunc("/transport/status", transportStatusHandler)
+    httpMux.HandleFunc("/transport/options", transportOptionsHandler)
+    httpMux.HandleFunc("/transport/strategy", transportStrategyHandler)
 
     httpSrv := &http.Server{
         Addr:    fmt.Sprintf(":%d", httpPort),
@@ -144,11 +157,22 @@ func main() {
 // indexHandler serves `index.html`, injecting wsPort and httpPort for the client
 func indexHandler(w http.ResponseWriter, r *http.Request) {
     w.Header().Set("Content-Type", "text/html; charset=utf-8")
-    portScript := fmt.Sprintf(
-        `<script>window.config = { wsPort: %d, httpPort: %d };</script>`,
-        wsPort, httpPort,
-    )
-    if _, err := w.Write([]byte(portScript)); err != nil {
+    config := struct {
+        WsPort     int    `json:"wsPort"`
+        HttpPort   int    `json:"httpPort"`
+        PublicBase string `json:"publicBase"`
+    }{
+        WsPort:     wsPort,
+        HttpPort:   httpPort,
+        PublicBase: publicBase,
+    }
+    configJSON, err := json.Marshal(config)
+    if err != nil {
+        log.Printf("Error marshaling config: %v", err)
+        configJSON = []byte(`{}`)
+    }
+    configScript := fmt.Sprintf(`<script>window.config = %s;</script>`, configJSON)
+    if _, err := w.Write([]byte(configScript)); err != nil {
         log.Printf("Error writing port script: %v", err)
     }
     data, err := embeddedFS.ReadFile("web/index.html")
@@ -174,12 +198,14 @@ func historyHandler(db *sql.DB) http.HandlerFunc {
         since, _ := strconv.ParseInt(sinceStr, 10, 64)
 
         rows, err := db.Query(`
-            SELECT peer_id, content, timestamp
-              FROM messages
-             WHERE room = ?
-               AND msg_type = 'text'
-               AND timestamp > ?
-             ORDER BY timestamp ASC
+            SELECT p.peer_id, m.content, m.timestamp
+              FROM messages m
+              JOIN chats c ON c.id = m.chat_id
+              JOIN peers p ON p.id = m.peer_id
+             WHERE c.name = ?
+               AND m.msg_type = 'text'
+               AND m.timestamp > ?
+             ORDER BY m.timestamp ASC
         `, room, since)
         if err != nil {
             http.Error(w, "query error", http.StatusInternalServerError)
@@ -313,12 +339,79 @@ func transportStatusHandler(w http.ResponseWriter, r *http.Request) {
         return
     }
     
+    strategyName := ""
+    if strategy, ok := globalTransport.GetStrategy(); ok {
+        strategyName = strategy.Name()
+    }
     status := map[string]interface{}{
         "peer_id": globalInstanceID,
         "connections": globalTransport.GetAllConnectionsInfo(),
         "available_transports": []string{"WebRTC_STUN", "WebRTC_TURN", "WebSocket", "HTTP_Polling", "LAN_Broadcast"},
+        "strategy": strategyName,
     }
     
     w.Header().Set("Content-Type", "application/json")
     json.NewEncoder(w).Encode(status)
+}
+
+// transportOptionsHandler returns available strategies and transport estimates.
+func transportOptionsHandler(w http.ResponseWriter, r *http.Request) {
+    if r.Method != http.MethodGet {
+        http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+        return
+    }
+
+    if globalTransport == nil {
+        http.Error(w, "transport not initialized", http.StatusInternalServerError)
+        return
+    }
+
+    networkInfo := globalTransport.CreateNetworkInfo("", "", "")
+    current := ""
+    if strategy, ok := globalTransport.GetStrategy(); ok {
+        current = strategy.Name()
+    }
+
+    payload := map[string]interface{}{
+        "current_strategy": current,
+        "strategies":        globalTransport.ListStrategyInfos(),
+        "transports":        globalTransport.ListTransportOptions(networkInfo),
+    }
+
+    w.Header().Set("Content-Type", "application/json")
+    json.NewEncoder(w).Encode(payload)
+}
+
+// transportStrategyHandler updates the active transport strategy.
+func transportStrategyHandler(w http.ResponseWriter, r *http.Request) {
+    if r.Method != http.MethodPost {
+        http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+        return
+    }
+
+    if globalTransport == nil {
+        http.Error(w, "transport not initialized", http.StatusInternalServerError)
+        return
+    }
+
+    type reqBody struct {
+        Name string `json:"name"`
+    }
+    var req reqBody
+    if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+        http.Error(w, "bad JSON", http.StatusBadRequest)
+        return
+    }
+    if req.Name == "" {
+        http.Error(w, "strategy name required", http.StatusBadRequest)
+        return
+    }
+
+    if err := globalTransport.SetStrategy(req.Name); err != nil {
+        http.Error(w, err.Error(), http.StatusBadRequest)
+        return
+    }
+
+    w.Header().Set("Content-Type", "application/json")
+    json.NewEncoder(w).Encode(map[string]string{"status": "ok"})
 }

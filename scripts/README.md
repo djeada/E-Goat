@@ -99,6 +99,34 @@ Cleans up test artifacts and stops any running instances.
 ./scripts/cleanup.sh
 ```
 
+### 🌐 `setup-network.sh` - Local Firewall + Network Checks
+Prepares Linux hosts for internet access (no external servers required).
+
+**What it does:**
+- Detects OS and LAN IPs
+- Optionally fetches WAN IP to detect CGNAT
+- Opens TCP ports (8080/9000) for UFW/firewalld/iptables
+- Optionally verifies local listeners
+- Prints router port-forwarding reminder
+
+**Usage:**
+```bash
+# Read-only checks
+./scripts/setup-network.sh
+
+# Apply firewall rules (requires sudo)
+sudo ./scripts/setup-network.sh --apply
+
+# Reset firewall rules to previous state (requires sudo)
+sudo ./scripts/setup-network.sh --reset
+
+# Attempt router port mapping (UPnP/NAT-PMP)
+./scripts/setup-network.sh --port-map
+
+# Verify listeners after starting the app
+./scripts/setup-network.sh --check-listeners
+```
+
 ## Quick Start
 
 For a complete verification of your E-Goat installation:

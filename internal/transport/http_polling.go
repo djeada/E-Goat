@@ -37,6 +37,10 @@ func (f *HTTPPollingFactory) CanCreate(connType ConnectionType) bool {
 	return connType == HTTPPolling
 }
 
+func (f *HTTPPollingFactory) Type() ConnectionType {
+	return HTTPPolling
+}
+
 func (f *HTTPPollingFactory) Priority() int {
 	return 40 // Lower priority fallback
 }

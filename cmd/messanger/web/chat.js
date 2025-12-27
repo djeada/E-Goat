@@ -1,8 +1,27 @@
 // web/chat.js
 
 // We support both HTTP polling and WebRTC connections
+const config = window.config || {};
 const httpOrigin = location.origin;
-const wsOrigin = `${location.protocol === 'https:' ? 'wss' : 'ws'}://${location.hostname}:9000`;
+const wsPort = Number.isInteger(config.wsPort) ? config.wsPort : 9000;
+const wsOrigin = `${location.protocol === 'https:' ? 'wss' : 'ws'}://${location.hostname}:${wsPort}`;
+
+function normalizePublicBase(value) {
+  if (!value || typeof value !== 'string') return httpOrigin;
+  let base = value.trim();
+  if (!base) return httpOrigin;
+  if (!base.includes("://")) {
+    base = `${location.protocol}//${base}`;
+  }
+  try {
+    const url = new URL(base);
+    return url.origin;
+  } catch {
+    return httpOrigin;
+  }
+}
+
+const publicBase = normalizePublicBase(config.publicBase);
 
 // Display configuration
 const PEER_ID_TRUNCATE_LENGTH = 8; // Number of characters to show for truncated peer IDs
@@ -60,6 +79,12 @@ window.addEventListener("load", () => {
           .addEventListener("click", toggleTransport);
   document.getElementById("connect-peer-btn")
           .addEventListener("click", connectToPeer);
+  document.getElementById("apply-strategy-btn")
+          .addEventListener("click", applyTransportStrategy);
+  document.getElementById("transport-strategy-select")
+          .addEventListener("change", updateStrategyDescription);
+  document.getElementById("transport-strategy-select")
+          .addEventListener("change", updateApplyButtonState);
   
   // Keyboard shortcuts
   document.getElementById("room-input")
@@ -83,9 +108,43 @@ async function fetchIP() {
     const { ip } = await res.json();
     myIP = ip;
     document.getElementById("my-ip").textContent = ip;
+    updateWanWarning(ip);
   } catch {
     document.getElementById("my-ip").textContent = "Unknown";
   }
+}
+
+function updateWanWarning(ip) {
+  const warningEl = document.getElementById("wan-warning");
+  if (!warningEl) return;
+  if (isPrivateIP(ip)) {
+    warningEl.textContent = "CGNAT detected: internet P2P may fail without TURN";
+    warningEl.classList.remove("hidden");
+  } else {
+    warningEl.textContent = "";
+    warningEl.classList.add("hidden");
+  }
+}
+
+function isPrivateIP(ip) {
+  if (!ip) return false;
+  if (ip.startsWith("10.")) return true;
+  if (ip.startsWith("192.168.")) return true;
+  if (ip.startsWith("172.")) {
+    const parts = ip.split(".");
+    if (parts.length > 1) {
+      const second = parseInt(parts[1], 10);
+      if (second >= 16 && second <= 31) return true;
+    }
+  }
+  if (ip.startsWith("100.")) {
+    const parts = ip.split(".");
+    if (parts.length > 1) {
+      const second = parseInt(parts[1], 10);
+      if (second >= 64 && second <= 127) return true;
+    }
+  }
+  return false;
 }
 
 // 2 Create/join a room
@@ -96,10 +155,11 @@ function joinRoom() {
   }
 
   // Build and show the HTTP deep‐link invite
-  const invite = `${httpOrigin}/?room=${room}&peer_id=${peerId}`;
+  const invite = `${publicBase}/?room=${room}&peer_id=${peerId}`;
   document.getElementById("invite-text"     ).value = invite;
   document.getElementById("invite-text-chat").value = invite;
   document.getElementById("invitation").classList.remove("hidden");
+  updateInviteWarning();
 
   // Swap to chat UI
   document.getElementById("init").classList.add("hidden");
@@ -119,6 +179,8 @@ function joinRoom() {
   if (useTransportLayer) {
     initializeTransport();
   }
+
+  fetchTransportOptions();
   
   // Update transport status display
   updateTransportStatus();
@@ -643,7 +705,7 @@ function updateTransportStatus() {
       statusText = `P2P Active • ${openChannels} WebRTC Channel${openChannels > 1 ? 's' : ''} • ${connectedPeers.size} Peer${connectedPeers.size > 1 ? 's' : ''}`;
     } else if (transportStatus === 'signaling_connected') {
       statusIcon = '🔄';
-      statusText = 'Signaling Connected • Waiting for peers...';
+      statusText = 'Signaling Ready • Waiting for peers...';
     } else if (transportStatus === 'connected') {
       statusIcon = '✅';
       statusText = `Connected • ${connectedPeers.size} Peer${connectedPeers.size > 1 ? 's' : ''}`;
@@ -657,6 +719,11 @@ function updateTransportStatus() {
     
     statusElement.textContent = `${statusIcon} ${statusText}`;
     statusElement.className = `transport-status ${transportStatus}`;
+
+    const strategyName = document.getElementById("strategy-name");
+    if (strategyName && window.currentStrategyName) {
+      strategyName.textContent = window.currentStrategyName;
+    }
     
     // Update peer ID display (truncated for readability)
     const peerIdElement = document.getElementById("my-peer-id");
@@ -716,5 +783,126 @@ function updateTransportStatus() {
         peerCountElement.textContent = 'Waiting for peers...';
       }
     }
+  }
+}
+
+async function fetchTransportOptions() {
+  try {
+    const res = await fetch(`${httpOrigin}/transport/options`);
+    if (!res.ok) throw new Error(res.statusText);
+    const data = await res.json();
+    renderTransportOptions(data);
+  } catch (e) {
+    console.error("Failed to load transport options:", e);
+  }
+}
+
+function renderTransportOptions(data) {
+  const select = document.getElementById("transport-strategy-select");
+  const description = document.getElementById("strategy-description");
+  const available = document.getElementById("available-transports");
+
+  if (!select || !data) return;
+  select.innerHTML = "";
+
+  const strategies = Array.isArray(data.strategies) ? data.strategies : [];
+  const current = data.current_strategy || "";
+  window.currentStrategyName = current || "auto";
+  window.strategyCatalog = strategies;
+
+  strategies.sort((a, b) => a.name.localeCompare(b.name));
+  for (const strategy of strategies) {
+    const opt = document.createElement("option");
+    opt.value = strategy.name;
+    opt.textContent = strategy.name;
+    if (strategy.name === current) {
+      opt.selected = true;
+      if (description) description.textContent = strategy.description || "";
+    }
+    select.appendChild(opt);
+  }
+
+  updateStrategyDescription();
+  updateApplyButtonState();
+
+  if (available) {
+    const transports = Array.isArray(data.transports) ? data.transports : [];
+    available.textContent = "";
+    for (const transport of transports) {
+      const chip = document.createElement("span");
+      chip.className = `transport-chip${transport.enabled ? "" : " disabled"}`;
+      chip.textContent = `${transport.type} ${transport.estimated_success}%`;
+      available.appendChild(chip);
+    }
+    if (transports.length === 0) {
+      available.textContent = "Unknown";
+    }
+  }
+
+  updateTransportStatus();
+}
+
+async function applyTransportStrategy() {
+  const select = document.getElementById("transport-strategy-select");
+  const description = document.getElementById("strategy-description");
+  if (!select) return;
+
+  const name = select.value;
+  try {
+    const res = await fetch(`${httpOrigin}/transport/strategy`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ name }),
+    });
+    if (!res.ok) throw new Error(await res.text());
+    window.currentStrategyName = name;
+    if (description) {
+      updateStrategyDescription();
+    }
+    await fetchTransportOptions();
+    appendMessage("System", `🔧 Strategy set to ${name}`);
+  } catch (e) {
+    console.error("Failed to apply strategy:", e);
+    appendMessage("System", `❌ Failed to set strategy: ${e.message}`);
+  }
+}
+
+function updateStrategyDescription() {
+  const select = document.getElementById("transport-strategy-select");
+  const description = document.getElementById("strategy-description");
+  if (!select || !description) return;
+
+  const strategies = window.strategyCatalog || [];
+  const match = strategies.find((s) => s.name === select.value);
+  description.textContent = match ? match.description || "" : "";
+}
+
+function updateApplyButtonState() {
+  const select = document.getElementById("transport-strategy-select");
+  const button = document.getElementById("apply-strategy-btn");
+  if (!select || !button) return;
+
+  const current = window.currentStrategyName || "";
+  button.disabled = select.value === current;
+  button.textContent = button.disabled ? "Applied" : "Apply";
+}
+
+function updateInviteWarning() {
+  const warning = document.getElementById("invite-warning");
+  if (!warning) return;
+
+  let host = location.hostname;
+  try {
+    host = new URL(publicBase).hostname;
+  } catch {
+    // fall back to current host
+  }
+
+  if (host === "localhost" || host === "127.0.0.1" || host === "::1") {
+    warning.textContent = "Invite link is local-only. Set -public-base for internet sharing.";
+    warning.classList.remove("hidden");
+  } else {
+    warning.textContent = "";
+    warning.classList.add("hidden");
   }
 }

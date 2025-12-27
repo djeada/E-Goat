@@ -36,6 +36,10 @@ func (f *LANBroadcastFactory) CanCreate(connType ConnectionType) bool {
 	return connType == LANBroadcast
 }
 
+func (f *LANBroadcastFactory) Type() ConnectionType {
+	return LANBroadcast
+}
+
 func (f *LANBroadcastFactory) Priority() int {
 	return 20 // Lowest priority - last resort
 }

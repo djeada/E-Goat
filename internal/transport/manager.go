@@ -12,6 +12,8 @@ import (
 type TransportManager struct {
 	connectionManager *LayeredConnectionManager
 	myPeerID          string
+	strategies        map[string]TransportStrategy
+	currentStrategy   string
 }
 
 // NewTransportManager creates a new transport manager with all connection types
@@ -19,10 +21,13 @@ func NewTransportManager(peerID string) *TransportManager {
 	tm := &TransportManager{
 		connectionManager: NewLayeredConnectionManager(),
 		myPeerID:          peerID,
+		strategies:        make(map[string]TransportStrategy),
 	}
 
 	// Register all connection factories in priority order
 	tm.registerFactories()
+	tm.registerDefaultStrategies()
+	_ = tm.SetStrategy("auto")
 
 	return tm
 }
@@ -64,6 +69,108 @@ func (tm *TransportManager) registerFactories() {
 	tm.connectionManager.RegisterFactory(lanFactory)
 
 	log.Println("All connection factories registered")
+}
+
+func (tm *TransportManager) registerDefaultStrategies() {
+	for _, strategy := range defaultStrategies() {
+		tm.RegisterStrategy(strategy)
+	}
+}
+
+// RegisterStrategy registers a new transport strategy.
+func (tm *TransportManager) RegisterStrategy(strategy TransportStrategy) {
+	tm.strategies[strategy.Name()] = strategy
+}
+
+// ListStrategies returns available transport strategies.
+func (tm *TransportManager) ListStrategies() []TransportStrategy {
+	out := make([]TransportStrategy, 0, len(tm.strategies))
+	for _, strategy := range tm.strategies {
+		out = append(out, strategy)
+	}
+	return out
+}
+
+// GetStrategy returns the current strategy, if set.
+func (tm *TransportManager) GetStrategy() (TransportStrategy, bool) {
+	strategy, ok := tm.strategies[tm.currentStrategy]
+	return strategy, ok
+}
+
+// SetStrategy changes the active strategy and updates allowed connection types.
+func (tm *TransportManager) SetStrategy(name string) error {
+	strategy, ok := tm.strategies[name]
+	if !ok {
+		return fmt.Errorf("unknown strategy: %s", name)
+	}
+	tm.currentStrategy = name
+	tm.connectionManager.SetAllowedTypes(strategy.AllowedTypes())
+	return nil
+}
+
+// TransportOption describes a transport's availability estimate.
+type TransportOption struct {
+	Type             string `json:"type"`
+	Priority         int    `json:"priority"`
+	EstimatedSuccess int    `json:"estimated_success"`
+	Enabled          bool   `json:"enabled"`
+}
+
+// StrategyInfo is a serializable view of a strategy.
+type StrategyInfo struct {
+	Name         string   `json:"name"`
+	Description  string   `json:"description"`
+	AllowedTypes []string `json:"allowed_types"`
+}
+
+// ListTransportOptions lists transports with availability estimates.
+func (tm *TransportManager) ListTransportOptions(networkInfo map[string]interface{}) []TransportOption {
+	allowed := make(map[ConnectionType]bool)
+	if strategy, ok := tm.GetStrategy(); ok {
+		for _, t := range strategy.AllowedTypes() {
+			allowed[t] = true
+		}
+	} else {
+		for _, t := range allConnectionTypes() {
+			allowed[t] = true
+		}
+	}
+
+	factories := tm.connectionManager.ListFactories()
+	options := make([]TransportOption, 0, len(factories))
+	for _, factory := range factories {
+		provider, ok := factory.(ConnectionTypeProvider)
+		if !ok {
+			continue
+		}
+		connType := provider.Type()
+		options = append(options, TransportOption{
+			Type:             string(connType),
+			Priority:         factory.Priority(),
+			EstimatedSuccess: factory.EstimateSuccess(tm.myPeerID, networkInfo),
+			Enabled:          allowed[connType],
+		})
+	}
+	return options
+}
+
+// ListStrategyInfos returns a serializable list of strategies.
+func (tm *TransportManager) ListStrategyInfos() []StrategyInfo {
+	strategies := tm.ListStrategies()
+	out := make([]StrategyInfo, 0, len(strategies))
+	for _, strategy := range strategies {
+		types := strategy.AllowedTypes()
+		typeNames := make([]string, 0, len(types))
+		for _, t := range types {
+			typeNames = append(typeNames, string(t))
+		}
+		out = append(out, StrategyInfo{
+			Name:         strategy.Name(),
+			Description:  strategy.Description(),
+			AllowedTypes: typeNames,
+		})
+	}
+	return out
 }
 
 // ConnectToPeer attempts to connect to a peer using all available methods

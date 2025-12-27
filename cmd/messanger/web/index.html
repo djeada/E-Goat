@@ -28,6 +28,7 @@
         <span class="status-dot"></span>
         <span id="my-ip">Detecting...</span>
       </div>
+      <div id="wan-warning" class="ip-warning hidden"></div>
     </div>
 
     <div class="field">
@@ -65,6 +66,14 @@
       <div id="transport-status" class="transport-status disconnected">
         ⚡ Initializing transport...
       </div>
+      <div class="transport-strategy">
+        <label for="transport-strategy-select">Strategy</label>
+        <div class="transport-strategy-controls">
+          <select id="transport-strategy-select"></select>
+          <button id="apply-strategy-btn" class="btn-secondary">Apply</button>
+        </div>
+        <div id="strategy-description" class="strategy-description"></div>
+      </div>
       <div class="transport-buttons">
         <button id="transport-toggle" class="btn-secondary">
           🔌 Disable Transport
@@ -78,6 +87,10 @@
       <!-- Diagnostic Information -->
       <div class="diagnostic-info">
         <h4>🔍 Connection Diagnostics</h4>
+        <div>
+          <strong>Strategy:</strong>
+          <span id="strategy-name">auto</span>
+        </div>
         <div>
           <strong>Your Peer ID:</strong>
           <span id="my-peer-id">Generating...</span>
@@ -94,13 +107,18 @@
           <strong>Connection Quality:</strong>
           <span id="connection-quality">Checking...</span>
         </div>
+        <div>
+          <strong>Available Transports:</strong>
+          <div id="available-transports" class="transport-chips">Checking...</div>
+        </div>
       </div>
     </div>
 
     <!-- Invite Link -->
-    <div id="invitation-chat">
+  <div id="invitation-chat">
       <p>🔗 Invite Link</p>
       <textarea id="invite-text-chat" readonly rows="2"></textarea>
+      <div id="invite-warning" class="invite-warning hidden"></div>
     </div>
 
     <!-- Messages -->
@@ -115,13 +133,6 @@
     </div>
   </div>
 
-  <script>
-    // injected by Go's indexHandler
-    window.config = {
-      wsPort:   {{.WsPort}},   // e.g. 9000
-      httpPort: {{.HttpPort}}, // e.g. 8080
-    };
-  </script>
   <script src="/static/chat.js"></script>
 </body>
 </html>

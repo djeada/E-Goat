@@ -47,6 +47,10 @@ func (f *WebRTCTURNFactory) CanCreate(connType ConnectionType) bool {
 	return connType == WebRTCTURN
 }
 
+func (f *WebRTCTURNFactory) Type() ConnectionType {
+	return WebRTCTURN
+}
+
 func (f *WebRTCTURNFactory) Priority() int {
 	return 80 // High priority, fallback from STUN
 }

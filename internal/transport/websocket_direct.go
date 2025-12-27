@@ -31,6 +31,10 @@ func (f *WebSocketDirectFactory) CanCreate(connType ConnectionType) bool {
 	return connType == WebSocketDirect
 }
 
+func (f *WebSocketDirectFactory) Type() ConnectionType {
+	return WebSocketDirect
+}
+
 func (f *WebSocketDirectFactory) Priority() int {
 	return 60 // Medium priority
 }

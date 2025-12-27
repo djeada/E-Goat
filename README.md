@@ -29,7 +29,7 @@ make run
 
 # Or manually:
 go build -o e-goat ./cmd/messanger
-./e-goat -http-port=8080 -ws-port=9000 -db=chat.db
+./e-goat -http-port=8080 -ws-port=9000 -db="$HOME/tmp/e-goat/chat.db"
 ```
 
 ### Access the Application
@@ -152,7 +152,8 @@ The system automatically adapts to different network conditions:
 ├─────────────────────────────────────────────────────────────┤
 │ ┌─────────────────┐  ┌────────────────────────────────────┐ │
 │ │ SQLite Storage  │  │        Web Interface               │ │
-│ │ (chat.db)       │  │ (HTML/CSS/JavaScript)              │ │
+│ │ ($HOME/tmp/     │  │ (HTML/CSS/JavaScript)              │ │
+│ │  e-goat/chat.db)│  │                                     │ │
 │ └─────────────────┘  └────────────────────────────────────┘ │
 └─────────────────────────────────────────────────────────────┘
 ```
@@ -180,6 +181,13 @@ E-Goat automatically handles network configuration challenges:
 
 By default the HTTP server (`:8080`) and signaling WS (`:9000`) listen on all interfaces, but most home networks sit behind NAT. To allow external peers to reach you without WebRTC STUN/TURN:
 
+#### Quick Linux Setup (Firewall + Checks)
+```bash
+./scripts/setup-network.sh
+sudo ./scripts/setup-network.sh --apply
+./scripts/setup-network.sh --port-map
+```
+
 #### Router Port-Forwarding
 ```bash
 # Forward these ports on your router:
@@ -188,6 +196,13 @@ By default the HTTP server (`:8080`) and signaling WS (`:9000`) listen on all in
 
 # External access URL format:
 # http://YOUR_WAN_IP:8080/?room=myroom&peer_id=XYZ
+```
+
+#### Public Invite Base (Optional)
+If you're running locally but want invite links to use a public IP or domain:
+```bash
+./e-goat -public-base="http://YOUR_WAN_IP:8080"
+# or set EGOAT_PUBLIC_BASE=http://YOUR_WAN_IP:8080
 ```
 
 #### Firewall Configuration
