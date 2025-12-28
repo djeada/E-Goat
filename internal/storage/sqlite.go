@@ -270,3 +270,280 @@ func migrateMessages(db *sql.DB) error {
 
     return tx.Commit()
 }
+
+// ====== ENHANCED STORAGE FUNCTIONS ======
+
+// PaginatedMessage represents a message with metadata for pagination
+type PaginatedMessage struct {
+    ID        int64  `json:"id"`
+    PeerID    string `json:"peer_id"`
+    Text      string `json:"text"`
+    MsgType   string `json:"msg_type"`
+    Timestamp int64  `json:"timestamp"`
+    Filename  string `json:"filename,omitempty"`
+}
+
+// PaginatedResult contains paginated messages with metadata
+type PaginatedResult struct {
+    Messages   []PaginatedMessage `json:"messages"`
+    Total      int64              `json:"total"`
+    Page       int                `json:"page"`
+    PerPage    int                `json:"per_page"`
+    TotalPages int                `json:"total_pages"`
+    HasMore    bool               `json:"has_more"`
+}
+
+// GetMessagesPaginated retrieves messages with pagination support
+func GetMessagesPaginated(db *sql.DB, room string, page, perPage int, since int64) (*PaginatedResult, error) {
+    if page < 1 {
+        page = 1
+    }
+    if perPage < 1 || perPage > 100 {
+        perPage = 50
+    }
+    offset := (page - 1) * perPage
+
+    // Get total count
+    var total int64
+    err := db.QueryRow(`
+        SELECT COUNT(*)
+        FROM messages m
+        JOIN chats c ON c.id = m.chat_id
+        WHERE c.name = ? AND m.timestamp > ?
+    `, room, since).Scan(&total)
+    if err != nil {
+        return nil, fmt.Errorf("counting messages: %w", err)
+    }
+
+    // Get paginated messages
+    rows, err := db.Query(`
+        SELECT m.id, p.peer_id, m.content, m.msg_type, m.timestamp, COALESCE(m.filename, '')
+        FROM messages m
+        JOIN chats c ON c.id = m.chat_id
+        JOIN peers p ON p.id = m.peer_id
+        WHERE c.name = ? AND m.timestamp > ?
+        ORDER BY m.timestamp ASC
+        LIMIT ? OFFSET ?
+    `, room, since, perPage, offset)
+    if err != nil {
+        return nil, fmt.Errorf("querying messages: %w", err)
+    }
+    defer rows.Close()
+
+    var messages []PaginatedMessage
+    for rows.Next() {
+        var msg PaginatedMessage
+        var content []byte
+        if err := rows.Scan(&msg.ID, &msg.PeerID, &content, &msg.MsgType, &msg.Timestamp, &msg.Filename); err != nil {
+            continue
+        }
+        msg.Text = string(content)
+        messages = append(messages, msg)
+    }
+
+    totalPages := int(total) / perPage
+    if int(total)%perPage != 0 {
+        totalPages++
+    }
+
+    return &PaginatedResult{
+        Messages:   messages,
+        Total:      total,
+        Page:       page,
+        PerPage:    perPage,
+        TotalPages: totalPages,
+        HasMore:    page < totalPages,
+    }, nil
+}
+
+// SearchMessages searches messages by text content
+func SearchMessages(db *sql.DB, room, query string, limit int) ([]PaginatedMessage, error) {
+    if limit < 1 || limit > 100 {
+        limit = 50
+    }
+
+    rows, err := db.Query(`
+        SELECT m.id, p.peer_id, m.content, m.msg_type, m.timestamp, COALESCE(m.filename, '')
+        FROM messages m
+        JOIN chats c ON c.id = m.chat_id
+        JOIN peers p ON p.id = m.peer_id
+        WHERE c.name = ? AND m.content LIKE ?
+        ORDER BY m.timestamp DESC
+        LIMIT ?
+    `, room, "%"+query+"%", limit)
+    if err != nil {
+        return nil, fmt.Errorf("searching messages: %w", err)
+    }
+    defer rows.Close()
+
+    var messages []PaginatedMessage
+    for rows.Next() {
+        var msg PaginatedMessage
+        var content []byte
+        if err := rows.Scan(&msg.ID, &msg.PeerID, &content, &msg.MsgType, &msg.Timestamp, &msg.Filename); err != nil {
+            continue
+        }
+        msg.Text = string(content)
+        messages = append(messages, msg)
+    }
+
+    return messages, nil
+}
+
+// RoomInfo contains room metadata
+type RoomInfo struct {
+    Name         string `json:"name"`
+    CreatedAt    int64  `json:"created_at"`
+    LastActive   int64  `json:"last_active"`
+    MessageCount int64  `json:"message_count"`
+    PeerCount    int64  `json:"peer_count"`
+}
+
+// GetRoomInfo retrieves detailed room information
+func GetRoomInfo(db *sql.DB, room string) (*RoomInfo, error) {
+    var info RoomInfo
+    info.Name = room
+
+    err := db.QueryRow(`
+        SELECT c.created_at, c.last_active,
+               (SELECT COUNT(*) FROM messages m WHERE m.chat_id = c.id),
+               (SELECT COUNT(DISTINCT m.peer_id) FROM messages m WHERE m.chat_id = c.id)
+        FROM chats c
+        WHERE c.name = ?
+    `, room).Scan(&info.CreatedAt, &info.LastActive, &info.MessageCount, &info.PeerCount)
+    if err != nil {
+        if err == sql.ErrNoRows {
+            return nil, nil
+        }
+        return nil, fmt.Errorf("getting room info: %w", err)
+    }
+
+    return &info, nil
+}
+
+// ListRooms lists all rooms with basic info
+func ListRooms(db *sql.DB) ([]RoomInfo, error) {
+    rows, err := db.Query(`
+        SELECT c.name, c.created_at, c.last_active,
+               (SELECT COUNT(*) FROM messages m WHERE m.chat_id = c.id),
+               (SELECT COUNT(DISTINCT m.peer_id) FROM messages m WHERE m.chat_id = c.id)
+        FROM chats c
+        ORDER BY c.last_active DESC
+    `)
+    if err != nil {
+        return nil, fmt.Errorf("listing rooms: %w", err)
+    }
+    defer rows.Close()
+
+    var rooms []RoomInfo
+    for rows.Next() {
+        var info RoomInfo
+        if err := rows.Scan(&info.Name, &info.CreatedAt, &info.LastActive, &info.MessageCount, &info.PeerCount); err != nil {
+            continue
+        }
+        rooms = append(rooms, info)
+    }
+
+    return rooms, nil
+}
+
+// PeerInfo contains peer metadata
+type PeerInfo struct {
+    PeerID       string `json:"peer_id"`
+    FirstSeen    int64  `json:"first_seen"`
+    LastSeen     int64  `json:"last_seen"`
+    MessageCount int64  `json:"message_count"`
+}
+
+// GetPeerInfo retrieves peer information
+func GetPeerInfo(db *sql.DB, peerID string) (*PeerInfo, error) {
+    var info PeerInfo
+
+    err := db.QueryRow(`
+        SELECT p.peer_id, p.first_seen, p.last_seen,
+               (SELECT COUNT(*) FROM messages m WHERE m.peer_id = p.id)
+        FROM peers p
+        WHERE p.peer_id = ?
+    `, peerID).Scan(&info.PeerID, &info.FirstSeen, &info.LastSeen, &info.MessageCount)
+    if err != nil {
+        if err == sql.ErrNoRows {
+            return nil, nil
+        }
+        return nil, fmt.Errorf("getting peer info: %w", err)
+    }
+
+    return &info, nil
+}
+
+// ListPeersInRoom lists all peers who have messaged in a room
+func ListPeersInRoom(db *sql.DB, room string) ([]PeerInfo, error) {
+    rows, err := db.Query(`
+        SELECT DISTINCT p.peer_id, p.first_seen, p.last_seen,
+               (SELECT COUNT(*) FROM messages m2 WHERE m2.peer_id = p.id)
+        FROM peers p
+        JOIN messages m ON m.peer_id = p.id
+        JOIN chats c ON c.id = m.chat_id
+        WHERE c.name = ?
+        ORDER BY p.last_seen DESC
+    `, room)
+    if err != nil {
+        return nil, fmt.Errorf("listing peers: %w", err)
+    }
+    defer rows.Close()
+
+    var peers []PeerInfo
+    for rows.Next() {
+        var info PeerInfo
+        if err := rows.Scan(&info.PeerID, &info.FirstSeen, &info.LastSeen, &info.MessageCount); err != nil {
+            continue
+        }
+        peers = append(peers, info)
+    }
+
+    return peers, nil
+}
+
+// DatabaseStats contains database statistics
+type DatabaseStats struct {
+    TotalMessages int64 `json:"total_messages"`
+    TotalRooms    int64 `json:"total_rooms"`
+    TotalPeers    int64 `json:"total_peers"`
+    DatabaseSize  int64 `json:"database_size_bytes"`
+}
+
+// GetDatabaseStats retrieves database statistics
+func GetDatabaseStats(db *sql.DB) (*DatabaseStats, error) {
+    var stats DatabaseStats
+
+    db.QueryRow(`SELECT COUNT(*) FROM messages`).Scan(&stats.TotalMessages)
+    db.QueryRow(`SELECT COUNT(*) FROM chats`).Scan(&stats.TotalRooms)
+    db.QueryRow(`SELECT COUNT(*) FROM peers`).Scan(&stats.TotalPeers)
+
+    // Get database size
+    var pageCount, pageSize int64
+    db.QueryRow(`PRAGMA page_count`).Scan(&pageCount)
+    db.QueryRow(`PRAGMA page_size`).Scan(&pageSize)
+    stats.DatabaseSize = pageCount * pageSize
+
+    return &stats, nil
+}
+
+// OptimizeDatabase runs VACUUM and ANALYZE on the database
+func OptimizeDatabase(db *sql.DB) error {
+    if _, err := db.Exec(`VACUUM`); err != nil {
+        return fmt.Errorf("vacuum failed: %w", err)
+    }
+    if _, err := db.Exec(`ANALYZE`); err != nil {
+        return fmt.Errorf("analyze failed: %w", err)
+    }
+    return nil
+}
+
+// DeleteOldMessages removes messages older than the specified timestamp
+func DeleteOldMessages(db *sql.DB, olderThan int64) (int64, error) {
+    result, err := db.Exec(`DELETE FROM messages WHERE timestamp < ?`, olderThan)
+    if err != nil {
+        return 0, fmt.Errorf("deleting old messages: %w", err)
+    }
+    return result.RowsAffected()
+}

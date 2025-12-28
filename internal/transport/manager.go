@@ -5,6 +5,7 @@ import (
 	"context"
 	"fmt"
 	"log"
+	"sync"
 	"time"
 )
 
@@ -286,4 +287,409 @@ func detectNATType() string {
 	// Implementation to detect NAT type
 	// This would involve STUN requests
 	return "cone" // Placeholder
+}
+
+// ====== ENHANCED TRANSPORT FEATURES ======
+
+// ConnectionPool manages a pool of reusable connections
+type ConnectionPool struct {
+	mu          sync.RWMutex
+	connections map[string][]Connection
+	maxPerPeer  int
+	maxTotal    int
+	totalCount  int
+}
+
+// NewConnectionPool creates a new connection pool
+func NewConnectionPool(maxPerPeer, maxTotal int) *ConnectionPool {
+	if maxPerPeer <= 0 {
+		maxPerPeer = 3
+	}
+	if maxTotal <= 0 {
+		maxTotal = 100
+	}
+	return &ConnectionPool{
+		connections: make(map[string][]Connection),
+		maxPerPeer:  maxPerPeer,
+		maxTotal:    maxTotal,
+	}
+}
+
+// Get retrieves a connection from the pool
+func (cp *ConnectionPool) Get(peerID string) (Connection, bool) {
+	cp.mu.Lock()
+	defer cp.mu.Unlock()
+
+	if conns, ok := cp.connections[peerID]; ok && len(conns) > 0 {
+		// Get the last connection (most recently added)
+		conn := conns[len(conns)-1]
+		cp.connections[peerID] = conns[:len(conns)-1]
+		cp.totalCount--
+		return conn, true
+	}
+	return nil, false
+}
+
+// Put adds a connection to the pool
+func (cp *ConnectionPool) Put(peerID string, conn Connection) bool {
+	cp.mu.Lock()
+	defer cp.mu.Unlock()
+
+	// Check if pool is full
+	if cp.totalCount >= cp.maxTotal {
+		return false
+	}
+
+	// Check if peer has too many connections
+	if len(cp.connections[peerID]) >= cp.maxPerPeer {
+		return false
+	}
+
+	cp.connections[peerID] = append(cp.connections[peerID], conn)
+	cp.totalCount++
+	return true
+}
+
+// Size returns the total number of pooled connections
+func (cp *ConnectionPool) Size() int {
+	cp.mu.RLock()
+	defer cp.mu.RUnlock()
+	return cp.totalCount
+}
+
+// Clear closes all pooled connections
+func (cp *ConnectionPool) Clear() {
+	cp.mu.Lock()
+	defer cp.mu.Unlock()
+
+	for _, conns := range cp.connections {
+		for _, conn := range conns {
+			conn.Close()
+		}
+	}
+	cp.connections = make(map[string][]Connection)
+	cp.totalCount = 0
+}
+
+// ReconnectionManager handles automatic reconnection with exponential backoff
+type ReconnectionManager struct {
+	mu            sync.RWMutex
+	attempts      map[string]int
+	lastAttempt   map[string]time.Time
+	maxAttempts   int
+	baseDelay     time.Duration
+	maxDelay      time.Duration
+	onReconnect   func(peerID string, conn Connection)
+}
+
+// NewReconnectionManager creates a new reconnection manager
+func NewReconnectionManager(maxAttempts int, baseDelay, maxDelay time.Duration) *ReconnectionManager {
+	if maxAttempts <= 0 {
+		maxAttempts = 5
+	}
+	if baseDelay <= 0 {
+		baseDelay = time.Second
+	}
+	if maxDelay <= 0 {
+		maxDelay = time.Minute
+	}
+	return &ReconnectionManager{
+		attempts:    make(map[string]int),
+		lastAttempt: make(map[string]time.Time),
+		maxAttempts: maxAttempts,
+		baseDelay:   baseDelay,
+		maxDelay:    maxDelay,
+	}
+}
+
+// SetReconnectHandler sets the callback for successful reconnections
+func (rm *ReconnectionManager) SetReconnectHandler(handler func(peerID string, conn Connection)) {
+	rm.onReconnect = handler
+}
+
+// ShouldReconnect determines if a reconnection should be attempted
+func (rm *ReconnectionManager) ShouldReconnect(peerID string) bool {
+	rm.mu.RLock()
+	defer rm.mu.RUnlock()
+
+	attempts := rm.attempts[peerID]
+	return attempts < rm.maxAttempts
+}
+
+// GetBackoffDelay returns the current backoff delay for a peer
+func (rm *ReconnectionManager) GetBackoffDelay(peerID string) time.Duration {
+	rm.mu.RLock()
+	defer rm.mu.RUnlock()
+
+	attempts := rm.attempts[peerID]
+	delay := rm.baseDelay * time.Duration(1<<uint(attempts)) // Exponential backoff
+
+	if delay > rm.maxDelay {
+		delay = rm.maxDelay
+	}
+	return delay
+}
+
+// RecordAttempt records a reconnection attempt
+func (rm *ReconnectionManager) RecordAttempt(peerID string) {
+	rm.mu.Lock()
+	defer rm.mu.Unlock()
+
+	rm.attempts[peerID]++
+	rm.lastAttempt[peerID] = time.Now()
+}
+
+// RecordSuccess resets the attempt counter on successful reconnection
+func (rm *ReconnectionManager) RecordSuccess(peerID string) {
+	rm.mu.Lock()
+	defer rm.mu.Unlock()
+
+	delete(rm.attempts, peerID)
+	delete(rm.lastAttempt, peerID)
+}
+
+// GetAttemptCount returns the number of attempts for a peer
+func (rm *ReconnectionManager) GetAttemptCount(peerID string) int {
+	rm.mu.RLock()
+	defer rm.mu.RUnlock()
+	return rm.attempts[peerID]
+}
+
+// ConnectionStats tracks connection statistics
+type ConnectionStats struct {
+	mu sync.RWMutex
+	
+	// Per-connection type stats
+	typeStats map[ConnectionType]*TypeStats
+	
+	// Global stats
+	totalConnections     int64
+	successfulConns      int64
+	failedConns          int64
+	activeConns          int64
+	totalMessagesSent    int64
+	totalMessagesRecv    int64
+	totalBytesSent       int64
+	totalBytesRecv       int64
+}
+
+// TypeStats contains statistics for a specific connection type
+type TypeStats struct {
+	Attempts     int64         `json:"attempts"`
+	Successes    int64         `json:"successes"`
+	Failures     int64         `json:"failures"`
+	Active       int64         `json:"active"`
+	AvgLatency   time.Duration `json:"avg_latency"`
+	latencies    []time.Duration
+}
+
+// NewConnectionStats creates a new connection stats tracker
+func NewConnectionStats() *ConnectionStats {
+	return &ConnectionStats{
+		typeStats: make(map[ConnectionType]*TypeStats),
+	}
+}
+
+// RecordConnectionAttempt records a connection attempt
+func (cs *ConnectionStats) RecordConnectionAttempt(connType ConnectionType, success bool, latency time.Duration) {
+	cs.mu.Lock()
+	defer cs.mu.Unlock()
+
+	cs.totalConnections++
+	
+	if _, ok := cs.typeStats[connType]; !ok {
+		cs.typeStats[connType] = &TypeStats{
+			latencies: make([]time.Duration, 0, 100),
+		}
+	}
+	
+	stats := cs.typeStats[connType]
+	stats.Attempts++
+	
+	if success {
+		cs.successfulConns++
+		stats.Successes++
+		stats.Active++
+		
+		// Track latency
+		stats.latencies = append(stats.latencies, latency)
+		if len(stats.latencies) > 100 {
+			stats.latencies = stats.latencies[1:]
+		}
+		
+		// Calculate average latency
+		var total time.Duration
+		for _, l := range stats.latencies {
+			total += l
+		}
+		stats.AvgLatency = total / time.Duration(len(stats.latencies))
+	} else {
+		cs.failedConns++
+		stats.Failures++
+	}
+}
+
+// RecordDisconnection records a disconnection
+func (cs *ConnectionStats) RecordDisconnection(connType ConnectionType) {
+	cs.mu.Lock()
+	defer cs.mu.Unlock()
+
+	cs.activeConns--
+	if stats, ok := cs.typeStats[connType]; ok {
+		stats.Active--
+	}
+}
+
+// RecordMessageSent records a sent message
+func (cs *ConnectionStats) RecordMessageSent(bytes int64) {
+	cs.mu.Lock()
+	defer cs.mu.Unlock()
+	cs.totalMessagesSent++
+	cs.totalBytesSent += bytes
+}
+
+// RecordMessageReceived records a received message
+func (cs *ConnectionStats) RecordMessageReceived(bytes int64) {
+	cs.mu.Lock()
+	defer cs.mu.Unlock()
+	cs.totalMessagesRecv++
+	cs.totalBytesRecv += bytes
+}
+
+// StatsSnapshot represents a snapshot of connection stats
+type StatsSnapshot struct {
+	TotalConnections  int64                     `json:"total_connections"`
+	SuccessfulConns   int64                     `json:"successful_connections"`
+	FailedConns       int64                     `json:"failed_connections"`
+	ActiveConns       int64                     `json:"active_connections"`
+	SuccessRate       float64                   `json:"success_rate"`
+	TotalMessagesSent int64                     `json:"total_messages_sent"`
+	TotalMessagesRecv int64                     `json:"total_messages_received"`
+	TotalBytesSent    int64                     `json:"total_bytes_sent"`
+	TotalBytesRecv    int64                     `json:"total_bytes_received"`
+	ByType            map[string]TypeStatsView  `json:"by_type"`
+}
+
+// TypeStatsView is a JSON-serializable view of TypeStats
+type TypeStatsView struct {
+	Attempts    int64   `json:"attempts"`
+	Successes   int64   `json:"successes"`
+	Failures    int64   `json:"failures"`
+	Active      int64   `json:"active"`
+	SuccessRate float64 `json:"success_rate"`
+	AvgLatencyMs int64  `json:"avg_latency_ms"`
+}
+
+// GetSnapshot returns a snapshot of current stats
+func (cs *ConnectionStats) GetSnapshot() *StatsSnapshot {
+	cs.mu.RLock()
+	defer cs.mu.RUnlock()
+
+	snapshot := &StatsSnapshot{
+		TotalConnections:  cs.totalConnections,
+		SuccessfulConns:   cs.successfulConns,
+		FailedConns:       cs.failedConns,
+		ActiveConns:       cs.activeConns,
+		TotalMessagesSent: cs.totalMessagesSent,
+		TotalMessagesRecv: cs.totalMessagesRecv,
+		TotalBytesSent:    cs.totalBytesSent,
+		TotalBytesRecv:    cs.totalBytesRecv,
+		ByType:            make(map[string]TypeStatsView),
+	}
+
+	if cs.totalConnections > 0 {
+		snapshot.SuccessRate = float64(cs.successfulConns) / float64(cs.totalConnections) * 100
+	}
+
+	for connType, stats := range cs.typeStats {
+		view := TypeStatsView{
+			Attempts:     stats.Attempts,
+			Successes:    stats.Successes,
+			Failures:     stats.Failures,
+			Active:       stats.Active,
+			AvgLatencyMs: stats.AvgLatency.Milliseconds(),
+		}
+		if stats.Attempts > 0 {
+			view.SuccessRate = float64(stats.Successes) / float64(stats.Attempts) * 100
+		}
+		snapshot.ByType[string(connType)] = view
+	}
+
+	return snapshot
+}
+
+// BandwidthEstimator estimates available bandwidth
+type BandwidthEstimator struct {
+	mu            sync.RWMutex
+	samples       []bandwidthSample
+	maxSamples    int
+	estimatedBps  float64
+}
+
+type bandwidthSample struct {
+	bytes     int64
+	duration  time.Duration
+	timestamp time.Time
+}
+
+// NewBandwidthEstimator creates a new bandwidth estimator
+func NewBandwidthEstimator() *BandwidthEstimator {
+	return &BandwidthEstimator{
+		samples:    make([]bandwidthSample, 0, 100),
+		maxSamples: 100,
+	}
+}
+
+// RecordTransfer records a data transfer for bandwidth estimation
+func (be *BandwidthEstimator) RecordTransfer(bytes int64, duration time.Duration) {
+	be.mu.Lock()
+	defer be.mu.Unlock()
+
+	sample := bandwidthSample{
+		bytes:     bytes,
+		duration:  duration,
+		timestamp: time.Now(),
+	}
+
+	be.samples = append(be.samples, sample)
+	if len(be.samples) > be.maxSamples {
+		be.samples = be.samples[1:]
+	}
+
+	// Recalculate estimate
+	be.recalculate()
+}
+
+func (be *BandwidthEstimator) recalculate() {
+	if len(be.samples) == 0 {
+		be.estimatedBps = 0
+		return
+	}
+
+	// Use exponential moving average with more weight on recent samples
+	var weightedSum, weightSum float64
+	for i, sample := range be.samples {
+		if sample.duration > 0 {
+			bps := float64(sample.bytes) / sample.duration.Seconds()
+			weight := float64(i + 1) // More weight to newer samples
+			weightedSum += bps * weight
+			weightSum += weight
+		}
+	}
+
+	if weightSum > 0 {
+		be.estimatedBps = weightedSum / weightSum
+	}
+}
+
+// GetEstimate returns the estimated bandwidth in bits per second
+func (be *BandwidthEstimator) GetEstimate() float64 {
+	be.mu.RLock()
+	defer be.mu.RUnlock()
+	return be.estimatedBps * 8 // Convert bytes to bits
+}
+
+// GetEstimateMbps returns the estimated bandwidth in megabits per second
+func (be *BandwidthEstimator) GetEstimateMbps() float64 {
+	return be.GetEstimate() / 1_000_000
 }

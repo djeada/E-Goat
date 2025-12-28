@@ -22,7 +22,12 @@ import (
     "github.com/djeada/E-Goat/internal/storage"
     "github.com/djeada/E-Goat/internal/signaling"
     "github.com/djeada/E-Goat/internal/transport"
+    "github.com/djeada/E-Goat/internal/middleware"
+    "github.com/djeada/E-Goat/internal/metrics"
 )
+
+// Version information
+const Version = "2.0.0"
 
 var (
     //go:embed web/*
@@ -32,10 +37,17 @@ var (
     wsPort   int
     dbPath   string
     publicBase string
+    rateLimit  int
     
     // Global transport manager for the instance
     globalTransport *transport.TransportManager
     globalInstanceID string
+    
+    // Global metrics collector
+    globalMetrics *metrics.Collector
+    
+    // Application start time
+    startTime time.Time
 )
 
 func init() {
@@ -43,6 +55,7 @@ func init() {
     flag.IntVar(&wsPort, "ws-port", 9000, "Port for signaling WebSocket server")
     flag.StringVar(&dbPath, "db", defaultDBPath(), "Path to SQLite database file")
     flag.StringVar(&publicBase, "public-base", os.Getenv("EGOAT_PUBLIC_BASE"), "Public base URL for invite links (optional)")
+    flag.IntVar(&rateLimit, "rate-limit", 100, "Maximum requests per minute per IP (0 to disable)")
 }
 
 func defaultDBPath() string {
@@ -55,6 +68,9 @@ func defaultDBPath() string {
 
 func main() {
     flag.Parse()
+    startTime = time.Now()
+
+    log.Printf("🐐 E-Goat v%s starting...", Version)
 
     // 1. Initialize SQLite database
     db, err := storage.InitDB(dbPath)
@@ -62,10 +78,16 @@ func main() {
         log.Fatalf("Database initialization failed: %v", err)
     }
     defer db.Close()
+    log.Printf("💾 Database initialized at %s", dbPath)
+
+    // 1.5. Initialize global metrics collector
+    globalMetrics = metrics.NewCollector()
+    log.Printf("📊 Metrics collector initialized")
 
     // 2. Create & run the signaling Hub
     hub := signaling.NewHub(db)
     go hub.Run()
+    log.Printf("📡 Signaling hub started")
 
     // 2.5. Initialize global transport manager
     globalInstanceID = fmt.Sprintf("instance-%d", httpPort)
@@ -78,15 +100,21 @@ func main() {
         if err := storage.SaveMessage(db, "transport", msg.From, "transport", msg.Data, nil); err != nil {
             log.Printf("Failed to save transport message: %v", err)
         }
+        // Record metrics
+        globalMetrics.RecordMessage(false, int64(len(msg.Data)))
     })
     
     globalTransport.SetConnectionHandler(func(peerID string, conn transport.Connection) {
         log.Printf("🔗 Transport connected to %s via %s (quality: %d%%)", 
             peerID, conn.Type(), conn.Quality())
+        globalMetrics.RecordConnection(string(conn.Type()))
+        globalMetrics.RegisterPeer(peerID, string(conn.Type()))
     })
     
     globalTransport.SetDisconnectHandler(func(peerID string, connType transport.ConnectionType) {
         log.Printf("🔌 Transport disconnected from %s (was using %s)", peerID, connType)
+        globalMetrics.RecordDisconnection(string(connType))
+        globalMetrics.UnregisterPeer(peerID)
     })
 
     // Note: Transport manager doesn't need explicit Start() - it's ready after creation
@@ -100,23 +128,67 @@ func main() {
 
     // 4. HTTP mux for UI + polling/send endpoints
     httpMux := http.NewServeMux()
+    
+    // Static and main routes
     httpMux.Handle("/static/", http.StripPrefix("/static/", http.FileServer(http.FS(contentFS))))
     httpMux.HandleFunc("/", indexHandler)
+    
+    // Core chat endpoints
     httpMux.HandleFunc("/history", historyHandler(db))
     httpMux.HandleFunc("/send", sendHandler(db))
+    
+    // Transport layer endpoints
     httpMux.HandleFunc("/transport/connect", transportConnectHandler)
     httpMux.HandleFunc("/transport/send", transportSendHandler)
     httpMux.HandleFunc("/transport/status", transportStatusHandler)
     httpMux.HandleFunc("/transport/options", transportOptionsHandler)
     httpMux.HandleFunc("/transport/strategy", transportStrategyHandler)
+    httpMux.HandleFunc("/transport/stats", transportStatsHandler)
+    
+    // Enhanced API endpoints
+    httpMux.HandleFunc("/api/v2/messages", messagesV2Handler(db))
+    httpMux.HandleFunc("/api/v2/rooms", roomsHandler(db))
+    httpMux.HandleFunc("/api/v2/rooms/info", roomInfoHandler(db))
+    httpMux.HandleFunc("/api/v2/peers", peersHandler(db))
+    httpMux.HandleFunc("/api/v2/search", searchHandler(db))
+    httpMux.HandleFunc("/api/v2/stats", dbStatsHandler(db))
+    
+    // Health and metrics endpoints
+    httpMux.HandleFunc("/health", middleware.HealthCheck(db, Version, startTime))
+    httpMux.HandleFunc("/metrics", globalMetrics.MetricsHandler())
+    httpMux.HandleFunc("/ready", readinessHandler(db))
+
+    // Apply middleware chain
+    var handler http.Handler = httpMux
+    
+    // Apply rate limiting if enabled
+    if rateLimit > 0 {
+        rateLimiter := middleware.NewRateLimiter(rateLimit, time.Minute)
+        handler = middleware.RateLimitMiddleware(rateLimiter)(handler)
+    }
+    
+    // Apply middleware chain
+    handler = middleware.Chain(
+        middleware.RecoveryMiddleware,
+        middleware.RequestIDMiddleware,
+        middleware.LoggingMiddleware,
+        middleware.SecurityHeadersMiddleware,
+        middleware.CORSMiddleware([]string{"*"}),
+        globalMetrics.MetricsMiddleware,
+    )(handler)
 
     httpSrv := &http.Server{
-        Addr:    fmt.Sprintf(":%d", httpPort),
-        Handler: httpMux,
+        Addr:         fmt.Sprintf(":%d", httpPort),
+        Handler:      handler,
+        ReadTimeout:  15 * time.Second,
+        WriteTimeout: 15 * time.Second,
+        IdleTimeout:  60 * time.Second,
     }
 
     go func() {
-        log.Printf("HTTP server listening on http://localhost:%d", httpPort)
+        log.Printf("🌐 HTTP server listening on http://localhost:%d", httpPort)
+        log.Printf("📊 Metrics available at http://localhost:%d/metrics", httpPort)
+        log.Printf("💚 Health check at http://localhost:%d/health", httpPort)
         if err := httpSrv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
             log.Fatalf("HTTP server error: %v", err)
         }
@@ -126,16 +198,20 @@ func main() {
     wsMux := http.NewServeMux()
     wsMux.Handle("/signal", hub) // Hub implements ServeHTTP for signaling
     wsSrv := &http.Server{
-        Addr:    fmt.Sprintf(":%d", wsPort),
-        Handler: wsMux,
+        Addr:         fmt.Sprintf(":%d", wsPort),
+        Handler:      wsMux,
+        ReadTimeout:  0, // No timeout for WebSocket
+        WriteTimeout: 0,
     }
 
     go func() {
-        log.Printf("Signaling WebSocket server listening on ws://localhost:%d/signal", wsPort)
+        log.Printf("📡 Signaling WebSocket server listening on ws://localhost:%d/signal", wsPort)
         if err := wsSrv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
             log.Fatalf("WebSocket server error: %v", err)
         }
     }()
+
+    log.Printf("✅ E-Goat v%s fully operational!", Version)
 
     // 6. Graceful shutdown on SIGINT/SIGTERM
     quit := make(chan os.Signal, 1)
@@ -414,4 +490,254 @@ func transportStrategyHandler(w http.ResponseWriter, r *http.Request) {
 
     w.Header().Set("Content-Type", "application/json")
     json.NewEncoder(w).Encode(map[string]string{"status": "ok"})
+}
+
+// ====== NEW ENHANCED API HANDLERS ======
+
+// transportStatsHandler returns detailed transport statistics
+func transportStatsHandler(w http.ResponseWriter, r *http.Request) {
+    if r.Method != http.MethodGet {
+        http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+        return
+    }
+
+    stats := map[string]interface{}{
+        "peer_id":   globalInstanceID,
+        "uptime":    time.Since(startTime).String(),
+        "version":   Version,
+    }
+
+    if globalTransport != nil {
+        stats["connections"] = globalTransport.GetAllConnectionsInfo()
+    }
+
+    w.Header().Set("Content-Type", "application/json")
+    json.NewEncoder(w).Encode(stats)
+}
+
+// messagesV2Handler returns paginated messages with enhanced features
+func messagesV2Handler(db *sql.DB) http.HandlerFunc {
+    return func(w http.ResponseWriter, r *http.Request) {
+        if r.Method != http.MethodGet {
+            http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+            return
+        }
+
+        room := r.URL.Query().Get("room")
+        if room == "" {
+            http.Error(w, "room parameter required", http.StatusBadRequest)
+            return
+        }
+
+        page := 1
+        if p := r.URL.Query().Get("page"); p != "" {
+            if parsed, err := strconv.Atoi(p); err == nil && parsed > 0 {
+                page = parsed
+            }
+        }
+
+        perPage := 50
+        if pp := r.URL.Query().Get("per_page"); pp != "" {
+            if parsed, err := strconv.Atoi(pp); err == nil && parsed > 0 && parsed <= 100 {
+                perPage = parsed
+            }
+        }
+
+        since := int64(0)
+        if s := r.URL.Query().Get("since"); s != "" {
+            if parsed, err := strconv.ParseInt(s, 10, 64); err == nil {
+                since = parsed
+            }
+        }
+
+        result, err := storage.GetMessagesPaginated(db, room, page, perPage, since)
+        if err != nil {
+            http.Error(w, fmt.Sprintf("database error: %v", err), http.StatusInternalServerError)
+            return
+        }
+
+        w.Header().Set("Content-Type", "application/json")
+        json.NewEncoder(w).Encode(result)
+    }
+}
+
+// roomsHandler lists all rooms
+func roomsHandler(db *sql.DB) http.HandlerFunc {
+    return func(w http.ResponseWriter, r *http.Request) {
+        if r.Method != http.MethodGet {
+            http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+            return
+        }
+
+        rooms, err := storage.ListRooms(db)
+        if err != nil {
+            http.Error(w, fmt.Sprintf("database error: %v", err), http.StatusInternalServerError)
+            return
+        }
+
+        w.Header().Set("Content-Type", "application/json")
+        json.NewEncoder(w).Encode(map[string]interface{}{
+            "rooms": rooms,
+            "count": len(rooms),
+        })
+    }
+}
+
+// roomInfoHandler returns detailed info about a specific room
+func roomInfoHandler(db *sql.DB) http.HandlerFunc {
+    return func(w http.ResponseWriter, r *http.Request) {
+        if r.Method != http.MethodGet {
+            http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+            return
+        }
+
+        room := r.URL.Query().Get("room")
+        if room == "" {
+            http.Error(w, "room parameter required", http.StatusBadRequest)
+            return
+        }
+
+        info, err := storage.GetRoomInfo(db, room)
+        if err != nil {
+            http.Error(w, fmt.Sprintf("database error: %v", err), http.StatusInternalServerError)
+            return
+        }
+
+        if info == nil {
+            http.Error(w, "room not found", http.StatusNotFound)
+            return
+        }
+
+        // Get peers in room
+        peers, _ := storage.ListPeersInRoom(db, room)
+
+        w.Header().Set("Content-Type", "application/json")
+        json.NewEncoder(w).Encode(map[string]interface{}{
+            "room":  info,
+            "peers": peers,
+        })
+    }
+}
+
+// peersHandler lists peers, optionally filtered by room
+func peersHandler(db *sql.DB) http.HandlerFunc {
+    return func(w http.ResponseWriter, r *http.Request) {
+        if r.Method != http.MethodGet {
+            http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+            return
+        }
+
+        room := r.URL.Query().Get("room")
+        peerID := r.URL.Query().Get("peer_id")
+
+        var result interface{}
+        var err error
+
+        if peerID != "" {
+            // Get specific peer info
+            result, err = storage.GetPeerInfo(db, peerID)
+            if result == nil && err == nil {
+                http.Error(w, "peer not found", http.StatusNotFound)
+                return
+            }
+        } else if room != "" {
+            // Get peers in specific room
+            result, err = storage.ListPeersInRoom(db, room)
+        } else {
+            http.Error(w, "room or peer_id parameter required", http.StatusBadRequest)
+            return
+        }
+
+        if err != nil {
+            http.Error(w, fmt.Sprintf("database error: %v", err), http.StatusInternalServerError)
+            return
+        }
+
+        w.Header().Set("Content-Type", "application/json")
+        json.NewEncoder(w).Encode(result)
+    }
+}
+
+// searchHandler searches messages
+func searchHandler(db *sql.DB) http.HandlerFunc {
+    return func(w http.ResponseWriter, r *http.Request) {
+        if r.Method != http.MethodGet {
+            http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+            return
+        }
+
+        room := r.URL.Query().Get("room")
+        query := r.URL.Query().Get("q")
+
+        if room == "" || query == "" {
+            http.Error(w, "room and q parameters required", http.StatusBadRequest)
+            return
+        }
+
+        limit := 50
+        if l := r.URL.Query().Get("limit"); l != "" {
+            if parsed, err := strconv.Atoi(l); err == nil && parsed > 0 && parsed <= 100 {
+                limit = parsed
+            }
+        }
+
+        messages, err := storage.SearchMessages(db, room, query, limit)
+        if err != nil {
+            http.Error(w, fmt.Sprintf("search error: %v", err), http.StatusInternalServerError)
+            return
+        }
+
+        w.Header().Set("Content-Type", "application/json")
+        json.NewEncoder(w).Encode(map[string]interface{}{
+            "query":    query,
+            "room":     room,
+            "count":    len(messages),
+            "messages": messages,
+        })
+    }
+}
+
+// dbStatsHandler returns database statistics
+func dbStatsHandler(db *sql.DB) http.HandlerFunc {
+    return func(w http.ResponseWriter, r *http.Request) {
+        if r.Method != http.MethodGet {
+            http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+            return
+        }
+
+        stats, err := storage.GetDatabaseStats(db)
+        if err != nil {
+            http.Error(w, fmt.Sprintf("stats error: %v", err), http.StatusInternalServerError)
+            return
+        }
+
+        w.Header().Set("Content-Type", "application/json")
+        json.NewEncoder(w).Encode(stats)
+    }
+}
+
+// readinessHandler checks if the service is ready to accept traffic
+func readinessHandler(db *sql.DB) http.HandlerFunc {
+    return func(w http.ResponseWriter, r *http.Request) {
+        // Check database
+        if err := db.Ping(); err != nil {
+            http.Error(w, "database not ready", http.StatusServiceUnavailable)
+            return
+        }
+
+        // Check transport manager
+        if globalTransport == nil {
+            http.Error(w, "transport not ready", http.StatusServiceUnavailable)
+            return
+        }
+
+        w.Header().Set("Content-Type", "application/json")
+        json.NewEncoder(w).Encode(map[string]interface{}{
+            "status": "ready",
+            "checks": map[string]string{
+                "database":  "ok",
+                "transport": "ok",
+            },
+        })
+    }
 }
