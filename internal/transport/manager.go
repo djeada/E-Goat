@@ -508,6 +508,7 @@ func (cs *ConnectionStats) RecordConnectionAttempt(connType ConnectionType, succ
 	
 	if success {
 		cs.successfulConns++
+		cs.activeConns++ // Increment global active connections
 		stats.Successes++
 		stats.Active++
 		

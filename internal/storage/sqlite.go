@@ -4,6 +4,7 @@ package storage
 import (
     "database/sql"
     "fmt"
+    "log"
     "os"
     "path/filepath"
     "time"
@@ -335,6 +336,7 @@ func GetMessagesPaginated(db *sql.DB, room string, page, perPage int, since int6
         var msg PaginatedMessage
         var content []byte
         if err := rows.Scan(&msg.ID, &msg.PeerID, &content, &msg.MsgType, &msg.Timestamp, &msg.Filename); err != nil {
+            log.Printf("Warning: failed to scan message row: %v", err)
             continue
         }
         msg.Text = string(content)
@@ -381,6 +383,7 @@ func SearchMessages(db *sql.DB, room, query string, limit int) ([]PaginatedMessa
         var msg PaginatedMessage
         var content []byte
         if err := rows.Scan(&msg.ID, &msg.PeerID, &content, &msg.MsgType, &msg.Timestamp, &msg.Filename); err != nil {
+            log.Printf("Warning: failed to scan search result row: %v", err)
             continue
         }
         msg.Text = string(content)
@@ -439,6 +442,7 @@ func ListRooms(db *sql.DB) ([]RoomInfo, error) {
     for rows.Next() {
         var info RoomInfo
         if err := rows.Scan(&info.Name, &info.CreatedAt, &info.LastActive, &info.MessageCount, &info.PeerCount); err != nil {
+            log.Printf("Warning: failed to scan room row: %v", err)
             continue
         }
         rooms = append(rooms, info)
@@ -495,6 +499,7 @@ func ListPeersInRoom(db *sql.DB, room string) ([]PeerInfo, error) {
     for rows.Next() {
         var info PeerInfo
         if err := rows.Scan(&info.PeerID, &info.FirstSeen, &info.LastSeen, &info.MessageCount); err != nil {
+            log.Printf("Warning: failed to scan peer row: %v", err)
             continue
         }
         peers = append(peers, info)

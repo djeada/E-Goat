@@ -2,6 +2,8 @@
 package middleware
 
 import (
+	"crypto/rand"
+	"encoding/hex"
 	"encoding/json"
 	"log"
 	"net/http"
@@ -260,16 +262,11 @@ func getClientIP(r *http.Request) string {
 }
 
 func generateRequestID() string {
-	// Simple request ID generation
-	return time.Now().Format("20060102150405") + "-" + randomString(8)
-}
-
-func randomString(n int) string {
-	const letters = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789"
-	b := make([]byte, n)
-	for i := range b {
-		b[i] = letters[time.Now().UnixNano()%int64(len(letters))]
-		time.Sleep(time.Nanosecond)
+	// Generate a cryptographically random request ID
+	b := make([]byte, 8)
+	if _, err := rand.Read(b); err != nil {
+		// Fallback to timestamp-based ID
+		return time.Now().Format("20060102150405.000000")
 	}
-	return string(b)
+	return time.Now().Format("20060102150405") + "-" + hex.EncodeToString(b)
 }
