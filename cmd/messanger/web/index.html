@@ -67,18 +67,105 @@
 
     <!-- Transport Layer Controls -->
     <div id="transport-controls" class="transport-panel">
-      <h3>🔗 Transport Layer</h3>
+      <div class="transport-header">
+        <h3>🔗 Connection Mode</h3>
+        <button id="help-toggle-btn" class="btn-icon btn-secondary" data-tooltip="Show help">❓</button>
+      </div>
+      
+      <!-- Help Section (collapsible) -->
+      <div id="connection-help" class="connection-help hidden">
+        <div class="help-section">
+          <h4>📡 How Connections Work</h4>
+          <p>E-Goat uses multiple connection methods to ensure reliable communication:</p>
+          
+          <div class="help-item">
+            <span class="help-icon">🚀</span>
+            <div>
+              <strong>WebRTC STUN (Best)</strong>
+              <p>Direct peer-to-peer connection. Works on most home networks. Lowest latency.</p>
+            </div>
+          </div>
+          
+          <div class="help-item">
+            <span class="help-icon">🔄</span>
+            <div>
+              <strong>WebRTC TURN (Fallback)</strong>
+              <p>Relayed P2P via TURN server. Works through strict firewalls and symmetric NATs.</p>
+            </div>
+          </div>
+          
+          <div class="help-item">
+            <span class="help-icon">⚡</span>
+            <div>
+              <strong>WebSocket</strong>
+              <p>Real-time bidirectional. Works in most corporate networks.</p>
+            </div>
+          </div>
+          
+          <div class="help-item">
+            <span class="help-icon">🌐</span>
+            <div>
+              <strong>HTTP Polling</strong>
+              <p>Universal fallback. Works everywhere but has higher latency.</p>
+            </div>
+          </div>
+          
+          <div class="help-item">
+            <span class="help-icon">📡</span>
+            <div>
+              <strong>LAN Broadcast</strong>
+              <p>Local network only. Perfect for same-network devices.</p>
+            </div>
+          </div>
+        </div>
+        
+        <div class="help-section">
+          <h4>🌍 Connecting Over the Internet</h4>
+          <div class="help-steps">
+            <div class="help-step">
+              <span class="step-number">1</span>
+              <p><strong>Port Forward:</strong> Forward ports 8080 (HTTP) and 9000 (WebSocket) on your router to this machine.</p>
+            </div>
+            <div class="help-step">
+              <span class="step-number">2</span>
+              <p><strong>Set Public Base:</strong> Start E-Goat with <code>-public-base="http://YOUR_PUBLIC_IP:8080"</code> or set <code>EGOAT_PUBLIC_BASE</code> environment variable.</p>
+            </div>
+            <div class="help-step">
+              <span class="step-number">3</span>
+              <p><strong>Share Link:</strong> Share the invite link with external users. They can connect directly to your public IP.</p>
+            </div>
+          </div>
+        </div>
+        
+        <div class="help-section">
+          <h4>🎯 Choosing a Strategy</h4>
+          <ul class="help-list">
+            <li><strong>auto:</strong> Recommended. Tries all methods in priority order.</li>
+            <li><strong>p2p-only:</strong> For low-latency direct connections (may fail on strict networks).</li>
+            <li><strong>relay-safe:</strong> For corporate/restricted networks.</li>
+            <li><strong>lan-only:</strong> For local network use only (no internet).</li>
+          </ul>
+        </div>
+      </div>
+      
       <div id="transport-status" class="transport-status disconnected">
         ⚡ Initializing transport...
       </div>
+      
+      <!-- Status Explanation -->
+      <div id="status-explanation" class="status-explanation">
+        <p id="status-detail">Connecting to signaling server...</p>
+      </div>
+      
       <div class="transport-strategy">
-        <label for="transport-strategy-select">Strategy</label>
+        <label for="transport-strategy-select">Connection Strategy</label>
         <div class="transport-strategy-controls">
           <select id="transport-strategy-select"></select>
           <button id="apply-strategy-btn" class="btn-secondary">Apply</button>
         </div>
         <div id="strategy-description" class="strategy-description"></div>
       </div>
+      
       <div class="transport-buttons">
         <button id="transport-toggle" class="btn-secondary">
           🔌 Disable Transport
@@ -126,7 +213,18 @@
         <textarea id="invite-text-chat" readonly rows="2"></textarea>
         <button id="copy-invite-chat-btn" class="btn-copy" data-tooltip="Copy to clipboard">📋</button>
       </div>
-      <div id="invite-warning" class="invite-warning hidden"></div>
+      <div id="invite-warning" class="invite-warning hidden">
+        <span class="warning-icon">⚠️</span>
+        <span class="warning-text"></span>
+      </div>
+      <div id="invite-help" class="invite-help hidden">
+        <p><strong>To share over the internet:</strong></p>
+        <ol>
+          <li>Forward ports 8080 and 9000 on your router</li>
+          <li>Restart E-Goat with <code>-public-base="http://YOUR_PUBLIC_IP:8080"</code></li>
+          <li>Or set environment variable: <code>EGOAT_PUBLIC_BASE=http://YOUR_IP:8080</code></li>
+        </ol>
+      </div>
     </div>
 
     <!-- Typing Indicator -->

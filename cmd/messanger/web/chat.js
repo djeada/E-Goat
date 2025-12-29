@@ -105,6 +105,10 @@ window.addEventListener("load", () => {
   document.getElementById("transport-strategy-select")
           .addEventListener("change", updateApplyButtonState);
   
+  // Help toggle button
+  const helpToggleBtn = document.getElementById("help-toggle-btn");
+  if (helpToggleBtn) helpToggleBtn.addEventListener("click", toggleConnectionHelp);
+  
   // Copy buttons
   const copyBtn = document.getElementById("copy-invite-btn");
   if (copyBtn) copyBtn.addEventListener("click", () => copyToClipboard("invite-text", copyBtn));
@@ -843,28 +847,50 @@ function updateTransportStatus() {
     let statusIcon = '⚡';
     let statusText = '';
     
+    // Get current strategy for display
+    const currentStrategy = window.currentStrategyName || 'auto';
+    
     if (!useTransportLayer) {
       statusIcon = '⏸️';
-      statusText = 'Transport Disabled';
+      statusText = 'Transport Disabled - Using HTTP polling only';
     } else if (openChannels > 0) {
       statusIcon = '🚀';
-      statusText = `P2P Active • ${openChannels} WebRTC Channel${openChannels > 1 ? 's' : ''} • ${connectedPeers.size} Peer${connectedPeers.size > 1 ? 's' : ''}`;
+      statusText = `P2P Active via WebRTC • ${openChannels} Channel${openChannels > 1 ? 's' : ''} • ${connectedPeers.size} Peer${connectedPeers.size > 1 ? 's' : ''}`;
     } else if (transportStatus === 'signaling_connected') {
-      statusIcon = '🔄';
-      statusText = 'Signaling Ready • Waiting for peers...';
+      statusIcon = '✅';
+      // More descriptive message explaining setup is complete
+      statusText = `Setup Complete (${currentStrategy}) • Share invite link for others to join • Will use best available method`;
     } else if (transportStatus === 'connected') {
       statusIcon = '✅';
-      statusText = `Connected • ${connectedPeers.size} Peer${connectedPeers.size > 1 ? 's' : ''}`;
+      statusText = `Connected via Transport • ${connectedPeers.size} Peer${connectedPeers.size > 1 ? 's' : ''}`;
     } else if (transportStatus === 'error') {
       statusIcon = '❌';
-      statusText = 'Connection Error';
+      statusText = 'Connection Error - Falling back to HTTP polling';
     } else {
       statusIcon = '📡';
-      statusText = 'Initializing...';
+      statusText = 'Initializing connection...';
     }
     
     statusElement.textContent = `${statusIcon} ${statusText}`;
     statusElement.className = `transport-status ${transportStatus}`;
+    
+    // Update status explanation with more context
+    const statusDetail = document.getElementById("status-detail");
+    if (statusDetail) {
+      if (!useTransportLayer) {
+        statusDetail.textContent = "Transport layer is disabled. Messages will be sent via HTTP polling (higher latency).";
+      } else if (openChannels > 0) {
+        statusDetail.textContent = `Direct peer-to-peer connection established via WebRTC. This is the fastest connection method with lowest latency.`;
+      } else if (transportStatus === 'signaling_connected') {
+        statusDetail.textContent = `Your room is ready! Share the invite link below. When someone joins, E-Goat will automatically connect using the best available method (${currentStrategy} strategy).`;
+      } else if (transportStatus === 'connected') {
+        statusDetail.textContent = `Connected to ${connectedPeers.size} peer(s) via the transport layer.`;
+      } else if (transportStatus === 'error') {
+        statusDetail.textContent = "Connection failed. Using HTTP polling as fallback. Try refreshing the page.";
+      } else {
+        statusDetail.textContent = "Connecting to signaling server...";
+      }
+    }
 
     const strategyName = document.getElementById("strategy-name");
     if (strategyName && window.currentStrategyName) {
@@ -901,32 +927,33 @@ function updateTransportStatus() {
       channelsElement.textContent = channelInfo.length > 0 ? channelInfo.join(' | ') : 'None';
     }
     
-    // Update connection quality with color-coded CSS
+    // Update connection quality with color-coded CSS and more context
     const qualityElement = document.getElementById("connection-quality");
     if (qualityElement) {
+      const currentStrategy = window.currentStrategyName || 'auto';
       if (openChannels > 0) {
-        qualityElement.textContent = `🟢 P2P Active (${openChannels} channel${openChannels > 1 ? 's' : ''})`;
+        qualityElement.textContent = `🟢 P2P Active (WebRTC - ${openChannels} channel${openChannels > 1 ? 's' : ''})`;
         qualityElement.style.color = "#38ef7d";
       } else if (connectedPeers.size > 0) {
-        qualityElement.textContent = "🟡 Transport Layer (fallback)";
+        qualityElement.textContent = "🟡 Connected via Transport Layer";
         qualityElement.style.color = "#f5576c";
       } else if (transportStatus === 'signaling_connected') {
-        qualityElement.textContent = "🟡 Signaling Ready";
-        qualityElement.style.color = "#f5576c";
+        qualityElement.textContent = `🟢 Ready (${currentStrategy}) - Awaiting peers`;
+        qualityElement.style.color = "#38ef7d";
       } else {
         qualityElement.textContent = "🔴 HTTP Polling Only";
         qualityElement.style.color = "#ff416c";
       }
     }
     
-    // Update room peer count
+    // Update room peer count with more context
     const peerCountElement = document.getElementById("room-peer-count");
     if (peerCountElement) {
       const totalPeers = connectedPeers.size;
       if (totalPeers > 0) {
-        peerCountElement.textContent = `${totalPeers} peer${totalPeers > 1 ? 's' : ''} online`;
+        peerCountElement.textContent = `${totalPeers} peer${totalPeers > 1 ? 's' : ''} connected`;
       } else {
-        peerCountElement.textContent = 'Waiting for peers...';
+        peerCountElement.textContent = 'Ready - Share invite to connect';
       }
     }
   }
@@ -1035,6 +1062,8 @@ function updateApplyButtonState() {
 
 function updateInviteWarning() {
   const warning = document.getElementById("invite-warning");
+  const warningText = warning?.querySelector(".warning-text");
+  const inviteHelp = document.getElementById("invite-help");
   if (!warning) return;
 
   let host = location.hostname;
@@ -1044,12 +1073,39 @@ function updateInviteWarning() {
     // fall back to current host
   }
 
-  if (host === "localhost" || host === "127.0.0.1" || host === "::1") {
-    warning.textContent = "Invite link is local-only. Set -public-base for internet sharing.";
+  const isLocalOnly = (host === "localhost" || host === "127.0.0.1" || host === "::1");
+  
+  if (isLocalOnly) {
+    if (warningText) {
+      warningText.textContent = "This invite link only works on your local network.";
+    } else {
+      warning.textContent = "This invite link only works on your local network.";
+    }
     warning.classList.remove("hidden");
+    if (inviteHelp) inviteHelp.classList.remove("hidden");
   } else {
-    warning.textContent = "";
+    if (warningText) {
+      warningText.textContent = "";
+    } else {
+      warning.textContent = "";
+    }
     warning.classList.add("hidden");
+    if (inviteHelp) inviteHelp.classList.add("hidden");
+  }
+}
+
+// Toggle connection help section visibility
+function toggleConnectionHelp() {
+  const helpSection = document.getElementById("connection-help");
+  const helpBtn = document.getElementById("help-toggle-btn");
+  if (!helpSection) return;
+  
+  const isHidden = helpSection.classList.contains("hidden");
+  helpSection.classList.toggle("hidden");
+  
+  if (helpBtn) {
+    helpBtn.textContent = isHidden ? "✕" : "❓";
+    helpBtn.setAttribute("data-tooltip", isHidden ? "Hide help" : "Show help");
   }
 }
 

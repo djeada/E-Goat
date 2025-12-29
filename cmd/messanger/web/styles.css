@@ -470,8 +470,24 @@ button.btn-icon {
   border-radius: var(--radius-md);
   font-weight: 500;
   font-size: 0.875rem;
-  margin-bottom: var(--spacing-md);
+  margin-bottom: var(--spacing-sm);
   transition: all var(--transition-normal);
+}
+
+/* Status Explanation */
+.status-explanation {
+  padding: var(--spacing-sm) var(--spacing-md);
+  margin-bottom: var(--spacing-md);
+  background: var(--bg-glass);
+  border-radius: var(--radius-sm);
+  border-left: 3px solid var(--accent-purple);
+}
+
+.status-explanation p {
+  font-size: 0.8rem;
+  color: var(--text-secondary);
+  margin: 0;
+  line-height: 1.5;
 }
 
 .transport-strategy {
@@ -531,12 +547,6 @@ button.btn-icon {
   background: rgba(255, 255, 255, 0.06);
   color: var(--text-muted);
   border: 1px solid var(--border-color);
-}
-
-.invite-warning {
-  margin-top: var(--spacing-xs);
-  font-size: 0.8rem;
-  color: #f5576c;
 }
 
 .transport-status.disconnected {
@@ -638,6 +648,229 @@ button.btn-icon {
 .diagnostic-info span {
   font-family: 'JetBrains Mono', 'Fira Code', monospace;
   color: var(--accent-cyan);
+}
+
+/* Transport Header */
+.transport-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: var(--spacing-md);
+}
+
+.transport-header h3 {
+  margin-bottom: 0;
+}
+
+/* Connection Help Section */
+.connection-help {
+  background: rgba(0, 0, 0, 0.3);
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-md);
+  padding: var(--spacing-lg);
+  margin-bottom: var(--spacing-md);
+  animation: slideDown 0.3s ease-out;
+}
+
+@keyframes slideDown {
+  from {
+    opacity: 0;
+    max-height: 0;
+    transform: translateY(-10px);
+  }
+  to {
+    opacity: 1;
+    max-height: 1000px;
+    transform: translateY(0);
+  }
+}
+
+.help-section {
+  margin-bottom: var(--spacing-lg);
+}
+
+.help-section:last-child {
+  margin-bottom: 0;
+}
+
+.help-section h4 {
+  font-size: 0.9rem;
+  font-weight: 600;
+  color: var(--text-primary);
+  margin-bottom: var(--spacing-sm);
+  display: flex;
+  align-items: center;
+  gap: var(--spacing-sm);
+}
+
+.help-section > p {
+  font-size: 0.85rem;
+  color: var(--text-secondary);
+  margin-bottom: var(--spacing-md);
+}
+
+.help-item {
+  display: flex;
+  gap: var(--spacing-md);
+  padding: var(--spacing-sm);
+  margin-bottom: var(--spacing-sm);
+  background: var(--bg-glass);
+  border-radius: var(--radius-sm);
+  transition: background var(--transition-fast);
+}
+
+.help-item:hover {
+  background: rgba(255, 255, 255, 0.08);
+}
+
+.help-item:last-child {
+  margin-bottom: 0;
+}
+
+.help-icon {
+  font-size: 1.25rem;
+  width: 30px;
+  text-align: center;
+  flex-shrink: 0;
+}
+
+.help-item strong {
+  display: block;
+  font-size: 0.85rem;
+  color: var(--text-primary);
+  margin-bottom: 2px;
+}
+
+.help-item p {
+  font-size: 0.75rem;
+  color: var(--text-secondary);
+  margin: 0;
+  line-height: 1.4;
+}
+
+.help-steps {
+  display: flex;
+  flex-direction: column;
+  gap: var(--spacing-sm);
+}
+
+.help-step {
+  display: flex;
+  gap: var(--spacing-md);
+  align-items: flex-start;
+  padding: var(--spacing-sm);
+  background: var(--bg-glass);
+  border-radius: var(--radius-sm);
+}
+
+.step-number {
+  width: 24px;
+  height: 24px;
+  background: var(--primary-gradient);
+  border-radius: var(--radius-full);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 0.75rem;
+  font-weight: 600;
+  flex-shrink: 0;
+}
+
+.help-step p {
+  font-size: 0.8rem;
+  color: var(--text-secondary);
+  margin: 0;
+  line-height: 1.5;
+}
+
+.help-step code {
+  background: rgba(102, 126, 234, 0.2);
+  color: var(--accent-cyan);
+  padding: 2px 6px;
+  border-radius: 4px;
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 0.7rem;
+}
+
+.help-list {
+  list-style: none;
+  padding: 0;
+  margin: 0;
+}
+
+.help-list li {
+  font-size: 0.8rem;
+  color: var(--text-secondary);
+  padding: var(--spacing-xs) var(--spacing-sm);
+  margin-bottom: var(--spacing-xs);
+  background: var(--bg-glass);
+  border-radius: var(--radius-sm);
+}
+
+.help-list li:last-child {
+  margin-bottom: 0;
+}
+
+.help-list strong {
+  color: var(--accent-cyan);
+}
+
+/* Improved Invite Warning */
+.invite-warning {
+  display: flex;
+  align-items: center;
+  gap: var(--spacing-sm);
+  margin-top: var(--spacing-sm);
+  padding: var(--spacing-sm) var(--spacing-md);
+  background: rgba(247, 151, 30, 0.1);
+  border: 1px solid rgba(247, 151, 30, 0.3);
+  border-radius: var(--radius-sm);
+  font-size: 0.8rem;
+  color: #ffd200;
+}
+
+.invite-warning .warning-icon {
+  font-size: 1rem;
+}
+
+.invite-warning .warning-text {
+  flex: 1;
+}
+
+/* Invite Help Section */
+.invite-help {
+  margin-top: var(--spacing-sm);
+  padding: var(--spacing-md);
+  background: rgba(102, 126, 234, 0.1);
+  border: 1px solid rgba(102, 126, 234, 0.3);
+  border-radius: var(--radius-sm);
+  animation: fadeIn 0.3s ease-out;
+}
+
+.invite-help p {
+  font-size: 0.8rem;
+  color: var(--text-primary);
+  margin-bottom: var(--spacing-sm);
+}
+
+.invite-help ol {
+  margin: 0;
+  padding-left: var(--spacing-lg);
+  font-size: 0.75rem;
+  color: var(--text-secondary);
+}
+
+.invite-help li {
+  margin-bottom: var(--spacing-xs);
+}
+
+.invite-help code {
+  background: rgba(102, 126, 234, 0.2);
+  color: var(--accent-cyan);
+  padding: 2px 6px;
+  border-radius: 4px;
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 0.7rem;
 }
 
 /* =====================================================
