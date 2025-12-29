@@ -470,8 +470,24 @@ button.btn-icon {
   border-radius: var(--radius-md);
   font-weight: 500;
   font-size: 0.875rem;
-  margin-bottom: var(--spacing-md);
+  margin-bottom: var(--spacing-sm);
   transition: all var(--transition-normal);
+}
+
+/* Status Explanation */
+.status-explanation {
+  padding: var(--spacing-sm) var(--spacing-md);
+  margin-bottom: var(--spacing-md);
+  background: var(--bg-glass);
+  border-radius: var(--radius-sm);
+  border-left: 3px solid var(--accent-purple);
+}
+
+.status-explanation p {
+  font-size: 0.8rem;
+  color: var(--text-secondary);
+  margin: 0;
+  line-height: 1.5;
 }
 
 .transport-strategy {
