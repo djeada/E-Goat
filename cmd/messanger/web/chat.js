@@ -105,6 +105,10 @@ window.addEventListener("load", () => {
   document.getElementById("transport-strategy-select")
           .addEventListener("change", updateApplyButtonState);
   
+  // Help toggle button
+  const helpToggleBtn = document.getElementById("help-toggle-btn");
+  if (helpToggleBtn) helpToggleBtn.addEventListener("click", toggleConnectionHelp);
+  
   // Copy buttons
   const copyBtn = document.getElementById("copy-invite-btn");
   if (copyBtn) copyBtn.addEventListener("click", () => copyToClipboard("invite-text", copyBtn));
@@ -1035,6 +1039,8 @@ function updateApplyButtonState() {
 
 function updateInviteWarning() {
   const warning = document.getElementById("invite-warning");
+  const warningText = warning?.querySelector(".warning-text");
+  const inviteHelp = document.getElementById("invite-help");
   if (!warning) return;
 
   let host = location.hostname;
@@ -1044,12 +1050,39 @@ function updateInviteWarning() {
     // fall back to current host
   }
 
-  if (host === "localhost" || host === "127.0.0.1" || host === "::1") {
-    warning.textContent = "Invite link is local-only. Set -public-base for internet sharing.";
+  const isLocalOnly = (host === "localhost" || host === "127.0.0.1" || host === "::1");
+  
+  if (isLocalOnly) {
+    if (warningText) {
+      warningText.textContent = "This invite link only works on your local network.";
+    } else {
+      warning.textContent = "This invite link only works on your local network.";
+    }
     warning.classList.remove("hidden");
+    if (inviteHelp) inviteHelp.classList.remove("hidden");
   } else {
-    warning.textContent = "";
+    if (warningText) {
+      warningText.textContent = "";
+    } else {
+      warning.textContent = "";
+    }
     warning.classList.add("hidden");
+    if (inviteHelp) inviteHelp.classList.add("hidden");
+  }
+}
+
+// Toggle connection help section visibility
+function toggleConnectionHelp() {
+  const helpSection = document.getElementById("connection-help");
+  const helpBtn = document.getElementById("help-toggle-btn");
+  if (!helpSection) return;
+  
+  const isHidden = helpSection.classList.contains("hidden");
+  helpSection.classList.toggle("hidden");
+  
+  if (helpBtn) {
+    helpBtn.textContent = isHidden ? "✕" : "❓";
+    helpBtn.setAttribute("data-tooltip", isHidden ? "Hide help" : "Show help");
   }
 }
 
